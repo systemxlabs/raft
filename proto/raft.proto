@@ -60,7 +60,7 @@ message Server {
 
 
 // Raft共识算法RPC服务
-service RaftConsensusService {
+service ConsensusService {
   rpc AppendEntries (AppendEntriesReq) returns (AppendEntriesResp) {}          // 附加日志条目RPC
   rpc RequestVote (RequestVoteReq) returns (RequestVoteResp) {}                // 请求选票RPC
   rpc InstallSnapshot (InstallSnapshotReq) returns (InstallSnapshotResp) {}    // 安装快照RPC
