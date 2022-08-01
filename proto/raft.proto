@@ -53,11 +53,6 @@ message InstallSnapshotResp {
   uint64 term = 1;                // 当前任期，便于领导人更新自己
 }
 
-message Server {
-  uint64 server_id = 1;           // 服务器 ID
-  string address = 2;             // 服务器的地址
-}
-
 
 // Raft共识算法RPC服务
 service ConsensusService {
