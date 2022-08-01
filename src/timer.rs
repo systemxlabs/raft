@@ -20,18 +20,22 @@ impl Timer {
     }
 
     pub fn schedule<F>(&mut self, interval: Duration, callback: F) where F: 'static + Send + FnMut() -> () {
-        // 更新计时间隔和下次触发时间
         (*self.interval.lock().unwrap()) = interval;
         (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
 
         let interval = self.interval.clone();
         let next_tick = self.next_tick.clone();
         self.handle = Some(std::thread::spawn(move || {
-            let mut callback = callback;
+            let callback = Arc::new(Mutex::new(callback));
             loop {
                 std::thread::sleep(THREAD_CHECK_INTERVAL);
                 if (*next_tick.lock().unwrap()) <= Instant::now() {
-                    callback();
+                    // TODO 异步执行回调函数，不阻塞计时器线程
+                    let callback = callback.clone();
+                    std::thread::spawn(move || {
+                        callback.lock().unwrap()();
+                    });
+                    // 重新计算下一次触发时间
                     (*next_tick.lock().unwrap()) = Instant::now() + (*interval.lock().unwrap());
                 }
             }
