@@ -1,0 +1,21 @@
+[package]
+name = "examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tonic_client"
+path = "src/hello-tonic/tonic_client.rs"
+
+[[bin]]
+name = "tonic_server"
+path = "src/hello-tonic/tonic_server.rs"
+
+[dependencies]
+tokio = { version = "1.0", features = [ "full" ] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = "0.7.0"
+prost = "0.10"
+
+[build-dependencies]
+tonic-build = "0.7.0"
