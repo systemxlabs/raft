@@ -1,4 +1,3 @@
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = raft::proto::consensus_rpc_client::ConsensusRpcClient::connect("http://[::1]:9001").await?;

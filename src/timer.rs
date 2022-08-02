@@ -4,6 +4,7 @@ use std::time::{Instant, Duration};
 // 计时器内部线程检查间隔
 const THREAD_CHECK_INTERVAL: Duration = Duration::from_millis(10);
 
+#[derive(Debug)]
 pub struct Timer {
     interval: Arc<Mutex<Duration>>,
     next_tick: Arc<Mutex<Instant>>,
