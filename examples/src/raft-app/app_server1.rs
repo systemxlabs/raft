@@ -1,4 +1,11 @@
+use std::sync::{Arc, Mutex};
+
 fn main () {
     println!("Hello, world!");
-    raft::server::start("[::1]:9001");
+    let consensus: Arc<Mutex<raft::consensus::Consensus>> = raft::server::start();
+    println!("Hello, world2!");
+    consensus.lock().unwrap().replicate();
+    loop {
+        
+    }
 }
