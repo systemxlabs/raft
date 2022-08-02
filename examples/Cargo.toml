@@ -6,16 +6,23 @@ edition = "2021"
 [[bin]]
 name = "tonic_client"
 path = "src/hello-tonic/tonic_client.rs"
-
 [[bin]]
 name = "tonic_server"
 path = "src/hello-tonic/tonic_server.rs"
+
+[[bin]]
+name = "app_server1"
+path = "src/raft-app/app_server1.rs"
+[[bin]]
+name = "rpc_client"
+path = "src/raft-app/rpc_client.rs"
 
 [dependencies]
 tokio = { version = "1.0", features = [ "full" ] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.7.0"
 prost = "0.10"
+raft = { path = "../"}
 
 [build-dependencies]
 tonic-build = "0.7.0"
