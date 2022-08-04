@@ -17,26 +17,26 @@ message LogEntry {
 }
 
 message AppendEntriesReq {
-  int64 term = 1;                 // 领导人的任期
-  int64 leaderId = 2;             // 领导人ID
-  int64 prevLogTerm = 3;          // 紧邻新日志条目之前的那个日志条目的任期
-  int64 prevLogIndex = 4;         // 紧邻新日志条目之前的那个日志条目的索引
+  uint64 term = 1;                // 领导人的任期
+  uint64 leaderId = 2;            // 领导人ID
+  uint64 prevLogTerm = 3;         // 紧邻新日志条目之前的那个日志条目的任期
+  uint64 prevLogIndex = 4;        // 紧邻新日志条目之前的那个日志条目的索引
   repeated LogEntry entries = 5;  // 需要被保存的日志条目
-  int64 leaderCommit = 6;         // 领导人的已知已提交的最高的日志条目的索引
+  uint64 leaderCommit = 6;        // 领导人的已知已提交的最高的日志条目的索引
 }
 message AppendEntriesResp {
-  int64 term = 1;                 // 当前任期
+  uint64 term = 1;                // 当前任期
   bool success = 2;               // 如果跟随者所含有的条目和 prevLogIndex 以及 prevLogTerm 匹配上了，则为 true
 }
 
 message RequestVoteReq {
-  int64 term = 1;                 // 候选人的任期
-  int64 candidateId = 2;          // 请求选票的候选人的 ID
-  int64 lastLogTerm = 3;          // 候选人最后日志条目的任期号
-  int64 lastLogIndex = 4;	      // 候选人最后日志条目的索引值
+  uint64 term = 1;                // 候选人的任期
+  uint64 candidateId = 2;         // 请求选票的候选人的 ID
+  uint64 lastLogTerm = 3;         // 候选人最后日志条目的任期号
+  uint64 lastLogIndex = 4;	      // 候选人最后日志条目的索引值
 }
 message RequestVoteResp {
-  int64 term = 1;                 // 当前任期号，以便于候选人去更新自己的任期号
+  uint64 term = 1;                // 当前任期号，以便于候选人去更新自己的任期号
   bool voteGranted = 2;           // 候选人赢得了此张选票时为真
 }
 

@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
+use logging::*;
 
 // 计时器内部线程检查间隔
 const THREAD_CHECK_INTERVAL: Duration = Duration::from_millis(10);
@@ -26,7 +27,8 @@ impl Timer {
     }
 
     pub fn schedule<F>(&mut self, interval: Duration, callback: F) where F: 'static + Send + FnMut() -> () {
-        println!("{} execute schedule with interval: {:?}", self.name, &interval);
+        info!("{} execute schedule with interval: {:?}", self.name, &interval);
+
         (*self.interval.lock().unwrap()) = interval;
         (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
         self.alive.store(true, Ordering::SeqCst);
@@ -34,19 +36,26 @@ impl Timer {
         let interval = self.interval.clone();
         let next_tick = self.next_tick.clone();
         let alive = self.alive.clone();
+
         self.handle = Some(std::thread::spawn(move || {
+
             let callback = Arc::new(Mutex::new(callback));
             loop {
+
                 std::thread::sleep(THREAD_CHECK_INTERVAL);
+
                 if !alive.load(Ordering::SeqCst) {
                     break;
                 }
+
                 if (*next_tick.lock().unwrap()) <= Instant::now() {
+
                     // TODO 异步执行回调函数，不阻塞计时器线程
                     let callback = callback.clone();
                     std::thread::spawn(move || {
                         callback.lock().unwrap()();
                     });
+
                     // 重新计算下一次触发时间
                     (*next_tick.lock().unwrap()) = Instant::now() + (*interval.lock().unwrap());
                 }
@@ -55,13 +64,13 @@ impl Timer {
     }
 
     pub fn reset(&mut self, interval: Duration) {
-        println!("{} execute reset with interval: {:?}", self.name, &interval);
+        info!("{} execute reset with interval: {:?}", self.name, &interval);
         (*self.interval.lock().unwrap()) = interval;
         (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
     }
 
     pub fn stop(&mut self) {
-        println!("{} execute stop", self.name);
+        info!("{} execute stop", self.name);
         self.alive.store(false, Ordering::SeqCst);
         if let Some(handle) = self.handle.take() {
             handle.join().unwrap();
