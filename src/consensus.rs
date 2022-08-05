@@ -214,7 +214,6 @@ impl Consensus {
     }
 
     pub fn handle_append_entries(&mut self, request: &proto::AppendEntriesReq) -> proto::AppendEntriesResp {
-        println!("handle_append_entires");
         match self.state {
             State::Leader => {
             }
@@ -238,6 +237,11 @@ impl Consensus {
     }
 
     pub fn handle_request_vote(&mut self, request: &proto::RequestVoteReq) -> proto::RequestVoteResp {
+        // 更新任期
+        // TODO 如果接收到的 RPC 请求或响应中，任期号T > currentTerm，则令 currentTerm = T，并切换为跟随者状态
+        if request.term > self.current_term {
+            self.term_update(request.term);
+        }
         let refuse_reply = proto::RequestVoteResp {
             term: self.current_term,
             vote_granted: false,
