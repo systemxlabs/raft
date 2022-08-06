@@ -63,15 +63,8 @@ impl Consensus {
     pub fn replicate(&mut self, data: String) {
         println!("replicate data: {}", &data);
 
-        let log_entry = proto::LogEntry {
-            term: self.current_term,
-            index: self.log.last_index() + 1,
-            r#type: proto::EntryType::Data.into(),
-            data: data.as_bytes().to_vec(),
-        };
-
         // 存入log entry
-        self.log.append_entries(vec![log_entry]);
+        self.log.append(self.current_term, vec![(proto::EntryType::Data, data.as_bytes().to_vec())]);
 
         // TODO 将 log entry 发送到 peer 节点
         self.append_entries();

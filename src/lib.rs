@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
 pub extern crate log as logging;
 pub extern crate rand;
+pub extern crate lazy_static;
 
 mod timer;
 pub mod peer;
