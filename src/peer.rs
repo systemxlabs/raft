@@ -5,7 +5,6 @@ pub struct Peer {
     pub next_index: u64,
     pub match_index: u64,
     pub vote_granted: bool,
-    pub is_leader: bool,
 }
 
 impl Peer {
@@ -16,7 +15,6 @@ impl Peer {
             next_index: 1,  // TODO
             match_index: 0,
             vote_granted: false,
-            is_leader: false,
         }
     }
 }
@@ -41,14 +39,6 @@ impl PeerManager {
         &mut self.peers
     }
 
-    pub fn leader(&mut self) -> Option<&mut Peer> {
-        for peer in self.peers.iter_mut() {
-            if peer.is_leader {
-                return Some(peer);
-            }
-        }
-        None
-    }
 }
 
 
@@ -63,7 +53,6 @@ mod tests {
             next_index: 3,
             match_index: 2,
             vote_granted: false,
-            is_leader: true,
         };
         let peer2 = super::Peer {
             server_id: 2,
@@ -71,11 +60,9 @@ mod tests {
             next_index: 2,
             match_index: 2,
             vote_granted: false,
-            is_leader: false,
         };
         peer_manager.add_peers(vec![peer1, peer2]);
         println!("{:?}", peer_manager);
         assert_eq!(peer_manager.peers().len(), 2);
-        assert_eq!(peer_manager.leader().unwrap().server_id, 1);
     }
 }

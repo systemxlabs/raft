@@ -4,7 +4,7 @@ use crate::proto;
 use crate::logging::*;
 
 lazy_static::lazy_static! {
-    static ref LOG_ENTRY_BEFORE_THE_FIRST_ENTRY: proto::LogEntry = proto::LogEntry {
+    static ref VIRTUAL_LOG_ENTRY: proto::LogEntry = proto::LogEntry {
         index: 0,
         term: 0,
         r#type: proto::EntryType::Noop.into(),
@@ -66,7 +66,7 @@ impl Log {
 
     pub fn prev_entry(&self, index: u64) -> Option<&proto::LogEntry> {
         if index < self.start_index {
-            return Some(&LOG_ENTRY_BEFORE_THE_FIRST_ENTRY);
+            return Some(&VIRTUAL_LOG_ENTRY);
         }
         self.entries.get((index - self.start_index - 1) as usize)
     }

@@ -23,6 +23,7 @@ pub struct Consensus {
     voted_for: u64,
     commit_index: u64,
     last_applied: u64,
+    leader_id: u64,
     peer_manager: peer::PeerManager,
     log: log::Log,
     rpc_client: rpc::Client,
@@ -42,9 +43,10 @@ impl Consensus {
             election_timer: Arc::new(Mutex::new(timer::Timer::new("election_timer"))),
             heartbeat_timer: Arc::new(Mutex::new(timer::Timer::new("heartbeat_timer"))),
             snapshot_timer: Arc::new(Mutex::new(timer::Timer::new("snapshot_timer"))),
-            voted_for: 0,
+            voted_for: config::NONE_SERVER_ID,
             commit_index: 0,  // 已提交日志索引，从0开始单调递增
             last_applied: 0,  // 已应用日志索引，从0开始单调递增
+            leader_id: config::NONE_SERVER_ID,
             peer_manager: peer::PeerManager::new(),
             log: log::Log::new(1),
             rpc_client: rpc::Client{},
@@ -60,14 +62,20 @@ impl Consensus {
     }
 
     // 上层应用请求复制数据
-    pub fn replicate(&mut self, data: String) {
-        println!("replicate data: {}", &data);
+    pub fn replicate(&mut self, data: String) -> Result<(), Box<dyn std::error::Error>> {
+        if self.state != State::Leader {
+            error!("replicate should be processed by leader");
+            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "not leader")));
+        }
+        info!("replicate data: {}", &data);
 
         // 存入log entry
         self.log.append(self.current_term, vec![(proto::EntryType::Data, data.as_bytes().to_vec())]);
 
-        // TODO 将 log entry 发送到 peer 节点
+        // TODO 将 log entry 发送到 peer 节点，可以跟随心跳一起发送
         self.append_entries();
+
+        Ok(())
     }
 
     // 附加日志到其他节点
@@ -81,12 +89,12 @@ impl Consensus {
         // TODO 并行发送附加日志请求
         let mut peers = self.peer_manager.peers();
         for peer in peers.iter() {
-            // let prev_log = self.log.get_entry(peer.next_index - 1);
+            let prev_log = self.log.prev_entry(self.log.last_index()).unwrap();
             let req = proto::AppendEntriesReq {
                 term: self.current_term,
                 leader_id: self.server_id,
-                prev_log_index: peer.next_index - 1,
-                prev_log_term: 0,  // TODO
+                prev_log_index: prev_log.index,
+                prev_log_term: prev_log.term,  // TODO
                 entries: vec![],
                 leader_commit: self.commit_index,
             };
@@ -144,20 +152,41 @@ impl Consensus {
         }
     }
 
-    // 安装快照到其他节点
+    // TODO 安装快照到其他节点
     fn install_snapshot(&self) {
         unimplemented!();
     }
 
     // 回退状态
-    fn step_down(&mut self) {
-        unimplemented!();
+    fn step_down(&mut self, new_term: u64) {
+        info!("step down to term {}, current term: {}", new_term, self.current_term);
+        if new_term < self.current_term {
+            error!("step down failed because new term {} is less than current term {}", new_term, self.current_term);
+            return;
+        }
+        if new_term > self.current_term {
+            self.state = State::Follower;
+            self.current_term = new_term;
+            self.voted_for = config::NONE_SERVER_ID;
+            self.leader_id = config::NONE_SERVER_ID;
+        } else {
+            // Leader收到term相同的RPC，也要回退
+            self.state = State::Follower;
+        }
+        
+        // 重置选举计时器
+        self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
     }
 
-    // 任期更新
-    fn term_update(&mut self, new_term: u64) {
-        self.current_term = new_term;
-        self.voted_for = 0;
+    // 选举成为leader
+    fn become_leader(&mut self) {
+        if self.state != State::Candidate {
+            error!("can't become leader because state is not candidate, current state is {:?}", self.state);
+            return;
+        }
+        self.state = State::Leader;
+        self.leader_id = self.server_id;
+        self.append_entries();
     }
 
     pub fn handle_heartbeat_timeout(&mut self) {
@@ -203,22 +232,28 @@ impl Consensus {
     }
 
     pub fn handle_snapshot_timeout(&mut self) {
-        println!("handle_snapshot_timeout");
+        // info!("handle_snapshot_timeout");
     }
 
     pub fn handle_append_entries(&mut self, request: &proto::AppendEntriesReq) -> proto::AppendEntriesResp {
+        let refuse_resp = proto::AppendEntriesResp {
+            term: self.current_term,
+            success: false,
+        };
+        // 比较任期
+        if request.term < self.current_term {
+            return refuse_resp;
+        }
+        self.step_down(request.term);
+
         match self.state {
             State::Leader => {
+                panic!("leader {} receive append entries from {}", self.server_id, request.leader_id);
             }
             State::Candidate => {
-                self.state = State::Follower;
-                // 重置选举计时器
-                self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
+                panic!("candidate {} receive append entries from {}", self.server_id, request.leader_id);
             }
             State::Follower => {
-
-                // 重置选举计时器
-                self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
             }
             _ => { error!("unknown state when handling append entries: {:?}", self.state); },
         }
@@ -233,7 +268,7 @@ impl Consensus {
         // 更新任期
         // TODO 如果接收到的 RPC 请求或响应中，任期号T > currentTerm，则令 currentTerm = T，并切换为跟随者状态
         if request.term > self.current_term {
-            self.term_update(request.term);
+            self.step_down(request.term);
         }
         let refuse_reply = proto::RequestVoteResp {
             term: self.current_term,
@@ -258,7 +293,7 @@ impl Consensus {
             }
             
             // 如果已投票给其他候选者，则拒绝投票
-            if self.voted_for != 0 && self.voted_for != request.candidate_id {
+            if self.voted_for != config::NONE_SERVER_ID && self.voted_for != request.candidate_id {
                 info!("Refuse vote for {} due to already voted for {}", request.candidate_id, self.voted_for);
                 return refuse_reply;
             }
@@ -279,7 +314,7 @@ impl Consensus {
     }
 
     pub fn handle_install_snapshot(&mut self, request: &proto::InstallSnapshotReq) -> proto::InstallSnapshotResp {
-        println!("handle_install_snapshot");
+        info!("handle_install_snapshot");
         let reply = proto::InstallSnapshotResp {
             term: 1,
         };
