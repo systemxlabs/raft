@@ -5,7 +5,6 @@ use logging::*;
 
 #[derive(Debug, PartialEq)]
 enum State {
-    // Unknown,
     Follower,
     Candidate,
     Leader,
@@ -62,7 +61,7 @@ impl Consensus {
     }
 
     // 上层应用请求复制数据
-    pub fn replicate(&mut self, data: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn replicate(&mut self, r#type: proto::EntryType, data: String) -> Result<(), Box<dyn std::error::Error>> {
         if self.state != State::Leader {
             error!("replicate should be processed by leader");
             return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "not leader")));
@@ -70,16 +69,18 @@ impl Consensus {
         info!("replicate data: {}", &data);
 
         // 存入log entry
-        self.log.append(self.current_term, vec![(proto::EntryType::Data, data.as_bytes().to_vec())]);
+        self.log.append(self.current_term, vec![(r#type, data.as_bytes().to_vec())]);
 
         // TODO 将 log entry 发送到 peer 节点，可以跟随心跳一起发送
-        self.append_entries();
+        self.append_entries(false);
+
+        // TODO 在条目被应用到状态机后响应客户端
 
         Ok(())
     }
 
     // 附加日志到其他节点
-    fn append_entries(&mut self) {
+    fn append_entries(&mut self, heartbeat: bool) {
         // 检查自己是否为leader
         if self.state != State::Leader {
             error!("state is {:?}, can't append entries", self.state);
@@ -89,7 +90,7 @@ impl Consensus {
         // TODO 并行发送附加日志请求
         let mut peers = self.peer_manager.peers();
         for peer in peers.iter() {
-            let prev_log = self.log.prev_entry(self.log.last_index()).unwrap();
+            let prev_log = self.log.entry(peer.next_index - 1).unwrap();
             let req = proto::AppendEntriesReq {
                 term: self.current_term,
                 leader_id: self.server_id,
@@ -141,8 +142,7 @@ impl Consensus {
                 // 获得多数选票（包括自己），成为leader，立即发送心跳
                 if vote_granted_count + 1 > (peers.len() / 2) {
                     info!("become leader");
-                    self.state = State::Leader;
-                    self.append_entries();
+                    self.become_leader();
                     return;
                 }
 
@@ -164,16 +164,18 @@ impl Consensus {
             error!("step down failed because new term {} is less than current term {}", new_term, self.current_term);
             return;
         }
+        self.state = State::Follower;
         if new_term > self.current_term {
-            self.state = State::Follower;
             self.current_term = new_term;
             self.voted_for = config::NONE_SERVER_ID;
             self.leader_id = config::NONE_SERVER_ID;
         } else {
-            // Leader收到term相同的RPC，也要回退
-            self.state = State::Follower;
+            // new_term == self.current_term 情况
+            // 1.Leader收到AppendEntries RPC => 回退到Follower
+            // 2.Leader收到RequestVote RPC => 不回退
+            // 3.Candidate收到AppendEntries RPC => 回退到Follower
+            // 4.Candidate收到RequestVote RPC => 不回退
         }
-        
         // 重置选举计时器
         self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
     }
@@ -186,14 +188,20 @@ impl Consensus {
         }
         self.state = State::Leader;
         self.leader_id = self.server_id;
-        self.append_entries();
+        // 添加NOOP日志
+        if let Err(e) = self.replicate(proto::EntryType::Noop, config::NONE_DATA.to_string()) {
+            error!("add noop entry failed after becoming leader, error: {:?}", e);
+        }
+    }
+
+    fn advance_commit_index(&mut self) {
     }
 
     pub fn handle_heartbeat_timeout(&mut self) {
         if self.state == State::Leader {
-            // 发送心跳并重置计时器
+            // 发送心跳
             info!("handle_heartbeat_timeout");
-            self.append_entries();
+            self.append_entries(true);
         }
     }
 
@@ -215,19 +223,20 @@ impl Consensus {
             },
             State::Follower => {
                 // Follwer发起选举
-                info!("start election");
+                if self.voted_for == config::NONE_SERVER_ID {
+                    info!("start election");
 
-                self.state = State::Candidate;  // 转为候选者
-                self.current_term += 1;  // 任期加1
-                self.voted_for = self.server_id;  // 给自己投票
+                    self.state = State::Candidate;  // 转为候选者
+                    self.current_term += 1;  // 任期加1
+                    self.voted_for = self.server_id;  // 给自己投票
 
-                // TODO 设置下一次选举超时随机值
-                self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
+                    // TODO 设置下一次选举超时随机值
+                    self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
 
-                // 发起投票
-                self.request_vote();
+                    // 发起投票
+                    self.request_vote();
+                }
             },
-            _ => { error!("unexpected state: {:?} when handling election timeout", self.state); },
         }
     }
 
@@ -244,7 +253,18 @@ impl Consensus {
         if request.term < self.current_term {
             return refuse_resp;
         }
+        // leader或candidate 收到term不小于自己的leader的AppendEntries RPC => 回退到Follower
         self.step_down(request.term);
+
+        // 更新leaderid
+        if self.leader_id == config::NONE_SERVER_ID {
+            info!("update leader id to {}", request.leader_id);
+            self.leader_id = request.leader_id;
+        }
+        if self.leader_id != request.leader_id {
+            error!("there are more than one leader id, current: {}, new: {}", self.leader_id, request.leader_id);
+            // TODO
+        }
 
         match self.state {
             State::Leader => {
@@ -255,62 +275,63 @@ impl Consensus {
             }
             State::Follower => {
             }
-            _ => { error!("unknown state when handling append entries: {:?}", self.state); },
         }
-        let reply = proto::AppendEntriesResp {
+        proto::AppendEntriesResp {
             success: true,
             term: 1,
-        };
-        reply
+        }
     }
 
     pub fn handle_request_vote(&mut self, request: &proto::RequestVoteReq) -> proto::RequestVoteResp {
-        // 更新任期
-        // TODO 如果接收到的 RPC 请求或响应中，任期号T > currentTerm，则令 currentTerm = T，并切换为跟随者状态
-        if request.term > self.current_term {
-            self.step_down(request.term);
-        }
         let refuse_reply = proto::RequestVoteResp {
             term: self.current_term,
             vote_granted: false,
         };
 
-        if self.state == State::Leader {
-            // TODO
+        // 比较任期
+        if request.term < self.current_term {
+            info!("Refuse vote for {} due to candidate's term is smaller", request.candidate_id);
             return refuse_reply;
-
-        } else if self.state == State::Candidate {
-
-            // 候选者拒绝投票
-            return refuse_reply;
-
-        } else if self.state == State::Follower {
-
-            // 如果候选者的任期比自己小，则拒绝投票
-            if request.term < self.current_term {
-                info!("Refuse vote for {} due to candidate's term is smaller", request.candidate_id);
-                return refuse_reply;
-            }
-            
-            // 如果已投票给其他候选者，则拒绝投票
-            if self.voted_for != config::NONE_SERVER_ID && self.voted_for != request.candidate_id {
-                info!("Refuse vote for {} due to already voted for {}", request.candidate_id, self.voted_for);
-                return refuse_reply;
-            }
-
-            // 投票给候选者
-            info!("Agree vote for server id {}", request.candidate_id);
-            self.voted_for = request.candidate_id;
-            // TODO 重置选举计时器
-            self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
-            return proto::RequestVoteResp {
-                term: self.current_term,
-                vote_granted: true,
-            };
         }
 
-        error!("state is {:?}, can't handle request vote", self.state);
-        refuse_reply
+        // leader或candidate 收到term大于自己的candidate的RequestVote RPC => 回退到Follower
+        if request.term > self.current_term {
+            self.step_down(request.term);
+        }
+
+        // candidate日志是否最新
+        let log_is_ok = request.term > self.log.last_term() || (request.term == self.log.last_term() && request.last_log_index >= self.log.last_index());
+        if !log_is_ok {
+            return refuse_reply;
+        }
+
+        // 已投给其他candidate
+        if self.voted_for != config::NONE_SERVER_ID && self.voted_for != request.candidate_id {
+            info!("Refuse vote for {} due to already voted for {}", request.candidate_id, self.voted_for);
+            return refuse_reply;
+        }
+
+        match self.state {
+            State::Leader => {
+                panic!("leader {} receive request vote from {}", self.server_id, request.candidate_id);
+            },
+            State::Candidate => {
+                panic!("candidate {} receive request vote from {}", self.server_id, request.candidate_id);
+            },
+            State::Follower => {
+            }
+        }
+
+        // 投票给候选者
+        info!("Agree vote for server id {}", request.candidate_id);
+        self.voted_for = request.candidate_id;
+        // TODO 重置选举计时器
+        self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
+
+        proto::RequestVoteResp {
+            term: self.current_term,
+            vote_granted: true
+        }
     }
 
     pub fn handle_install_snapshot(&mut self, request: &proto::InstallSnapshotReq) -> proto::InstallSnapshotResp {

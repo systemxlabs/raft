@@ -12,3 +12,5 @@ pub const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(30000);
 
 // 空server id
 pub const NONE_SERVER_ID: u64 = 0;
+// 空data
+pub const NONE_DATA: &'static str = "None";

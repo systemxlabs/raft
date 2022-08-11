@@ -7,7 +7,7 @@ Raft 协议的 Rust 实现。
 - [ ] 客户端交互
 
 Raft 协议
-- 中文：[maemual/raft-zh_cn](https://github.com/maemual/raft-zh_cn/blob/master/raft-zh_cn.md)、doc/raft-zh_cn.pdf
+- 中文：[maemual/raft-zh_cn](https://github.com/maemual/raft-zh_cn/blob/master/raft-zh_cn.md)、doc/raft-zh_cn.pdf、[OneSizeFitsQuorum/raft-thesis-zh_cn](https://github.com/OneSizeFitsQuorum/raft-thesis-zh_cn/blob/master/raft-thesis-zh_cn.md)
 - 英文：doc/raft.pdf
 - https://raft.github.io/
 
@@ -15,10 +15,9 @@ Raft 协议
 
 
 ## 参考
-- [wenweihu86/raft-java](https://github.com/wenweihu86/raft-java)
 - [logcabin/logcabin](https://github.com/logcabin/logcabin)
+- [wenweihu86/raft-java](https://github.com/wenweihu86/raft-java)
 - [baidu/braft](https://github.com/baidu/braft)
-- [hezhihua/horse-raft](https://github.com/hezhihua/horse-raft)
 - [b站 MIT 6.824课程](https://www.bilibili.com/video/BV1R7411t71W)
 
 ## 问题
@@ -30,4 +29,18 @@ Raft 协议
 
 **3.如果leader网络出现单向故障，比如leader可以发出请求但无法接收请求，这样导致leader可以往followers发送心跳，但leader无法收到客户端请求，整个集群不可用，而且leader往follower发送的心跳会压制follower选举出新的leader，这种情况如何解决？**
 
-**4.假如某个节点网络不可用，此节点不断执行选举-选举超时，term会增加到很大，会有什么影响？如何优化？**
+**4.假如某个节点网络不可用（跟其他节点网络隔离），此节点不断执行选举-选举超时，term会增加到很大，会有什么影响？如何优化？**
+
+**5.心跳间隔、超时选举等时间设置最佳实践？**
+
+**6.日志何时算作提交了？**
+
+在leader将创建的日志条目复制到大多数的服务器上的时候，日志条目就算作提交（即使leadercommit没有增加或者传播到其他followers）。在后续选举时，新leader一定包含这条已提交的日志。
+
+**7.follower收到candidate的RequestVote RPC，是否需要重置选举计时器？**
+
+**8.为什么选举出leader后，leader要立刻append一条Noop日志条目？**
+
+**9.leader在复制到多数节点后，在回复客户端前宕机了，此时客户端收到超时进行重试，如何保证重试幂等性以防止同一数据复制多次？**
+
+**10.multi-raft是如何实现的？**
