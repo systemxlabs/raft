@@ -50,7 +50,7 @@ impl Timer {
 
                 if (*next_tick.lock().unwrap()) <= Instant::now() {
 
-                    // TODO 异步执行回调函数，不阻塞计时器线程
+                    // 异步执行回调函数，不阻塞计时器线程
                     let callback = callback.clone();
                     std::thread::spawn(move || {
                         callback.lock().unwrap()();

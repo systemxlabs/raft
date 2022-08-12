@@ -64,6 +64,17 @@ impl Log {
         self.entries.get((index - self.start_index) as usize)
     }
 
+    pub fn pack_entries(&self, next_index: u64) -> Vec<proto::LogEntry> {
+        let mut res: Vec<proto::LogEntry> = Vec::new();
+        if next_index < self.start_index {
+            return res;
+        }
+        for entry in self.entries.iter().skip((next_index - self.start_index) as usize) {
+            res.push(entry.clone());
+        }
+        res
+    }
+
     pub fn last_index(&self) -> u64 {
         self.entries.last().map(|entry| entry.index).unwrap_or(self.start_index - 1)
     }
@@ -91,5 +102,8 @@ mod tests {
         assert_eq!(log.entry(1).unwrap().data, "test1".as_bytes());
         assert_eq!(log.entry(2).unwrap().data, "test2".as_bytes());
         assert_eq!(log.last_index(), 2);
+        assert_eq!(log.pack_entries(1).len(), 2);
+        assert_eq!(log.pack_entries(2).len(), 1);
+        assert_eq!(log.pack_entries(3).len(), 0);
     }
 }

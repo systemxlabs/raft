@@ -1,6 +1,7 @@
 use crate::{proto, timer, peer, log, rpc, util, config};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Instant, Duration};
+use std::cell::RefCell;
 use logging::*;
 
 #[derive(Debug, PartialEq)]
@@ -23,9 +24,9 @@ pub struct Consensus {
     commit_index: u64,
     last_applied: u64,
     leader_id: u64,
-    peer_manager: peer::PeerManager,
+    peer_manager: Arc<Mutex<peer::PeerManager>>,
     log: log::Log,
-    rpc_client: rpc::Client,
+    rpc_client: rpc::Client,  // TODO 可以将RPC Client移到peer中
     tokio_runtime: tokio::runtime::Runtime,
 }
 
@@ -46,7 +47,7 @@ impl Consensus {
             commit_index: 0,  // 已提交日志索引，从0开始单调递增
             last_applied: 0,  // 已应用日志索引，从0开始单调递增
             leader_id: config::NONE_SERVER_ID,
-            peer_manager: peer::PeerManager::new(),
+            peer_manager: Arc::new(Mutex::new(peer::PeerManager::new())),
             log: log::Log::new(1),
             rpc_client: rpc::Client{},
             tokio_runtime,
@@ -55,7 +56,7 @@ impl Consensus {
         // TODO 加载snapshot
 
         // TODO 初始化其他服务器peers
-        consensus.peer_manager.add_peers(peers);
+        consensus.peer_manager.lock().unwrap().add_peers(peers);
 
         Arc::new(Mutex::new(consensus))
     }
@@ -68,10 +69,10 @@ impl Consensus {
         }
         info!("replicate data: {}", &data);
 
-        // 存入log entry
+        // 存入 log entry
         self.log.append(self.current_term, vec![(r#type, data.as_bytes().to_vec())]);
 
-        // TODO 将 log entry 发送到 peer 节点，可以跟随心跳一起发送
+        // 将 log entry 发送到 peer 节点
         self.append_entries(false);
 
         // TODO 在条目被应用到状态机后响应客户端
@@ -80,32 +81,72 @@ impl Consensus {
     }
 
     // 附加日志到其他节点
-    fn append_entries(&mut self, heartbeat: bool) {
+    fn append_entries(&mut self, heartbeat: bool) -> bool {
         // 检查自己是否为leader
         if self.state != State::Leader {
             error!("state is {:?}, can't append entries", self.state);
-            return;
+            return false;
         }
 
         // TODO 并行发送附加日志请求
-        let mut peers = self.peer_manager.peers();
-        for peer in peers.iter() {
-            let prev_log = self.log.entry(peer.next_index - 1).unwrap();
-            let req = proto::AppendEntriesReq {
-                term: self.current_term,
-                leader_id: self.server_id,
-                prev_log_index: prev_log.index,
-                prev_log_term: prev_log.term,  // TODO
-                entries: vec![],
-                leader_commit: self.commit_index,
-            };
-            // TODO 发送附加日志请求
-            if let Err(_) = self.tokio_runtime.block_on(self.rpc_client.append_entries(req, peer.server_addr.clone())) {
-                error!("append entries to {} failed", &peer.server_addr);
-            }
-            // TODO 更新 peer 的 next_index 和 match_index
-
+        let mut peer_manager = self.peer_manager.clone();
+        let mut peer_manager = peer_manager.lock().unwrap();
+        let mut peers = peer_manager.peers_mut();
+        for peer in peers.iter_mut() {
+            self.append_entries_to_peer(peer, heartbeat);
         }
+        
+        true
+    }
+
+    fn append_entries_to_peer(&mut self, peer: &mut peer::Peer, heartbeat: bool) -> bool {
+        let entries: Vec<proto::LogEntry> = match heartbeat {
+            true => {self.log.pack_entries(peer.next_index)},
+            false => {Vec::new()}
+        };
+        let entries_num = entries.len();
+
+        let prev_log_index = peer.next_index - 1;
+        let prev_log = self.log.entry(prev_log_index).unwrap();
+        let req = proto::AppendEntriesReq {
+            term: self.current_term,
+            leader_id: self.server_id,
+            prev_log_index: prev_log_index,
+            prev_log_term: prev_log.term,
+            entries,
+            leader_commit: self.commit_index,
+        };
+        // 发送附加日志请求
+        let resp = match self.tokio_runtime.block_on(self.rpc_client.append_entries(req, peer.server_addr.clone())) {
+            Ok(resp) => {resp},
+            Err(_) => {
+                error!("append entries to {} failed", &peer.server_addr);
+                return false;},
+        };
+
+        // 比较任期
+        if resp.term > self.current_term {
+            self.step_down(resp.term);
+            return false;
+        }
+
+        match resp.success {
+            true => {
+                // 更新 next_index 和 match_index
+                peer.match_index = prev_log_index + entries_num as u64;
+                peer.next_index = peer.match_index + 1;
+                return true;
+            }
+            false => {
+                // next_index减一
+                if peer.next_index > 1 {
+                    peer.next_index -= 1;
+                }
+                return false;
+            }
+        }
+
+        true
     }
 
     // 请求其他节点投票
@@ -114,7 +155,9 @@ impl Consensus {
         let mut vote_granted_count = 0;
 
         // TODO 并行发送投票请求
-        let mut peers = self.peer_manager.peers();
+        let mut peer_manager = self.peer_manager.clone();
+        let mut peer_manager = peer_manager.lock().unwrap();
+        let mut peers = peer_manager.peers_mut();
         for peer in peers.iter() {
             info!("request vote to {:?}", &peer.server_addr);
             let req = proto::RequestVoteReq {
@@ -195,6 +238,13 @@ impl Consensus {
     }
 
     fn advance_commit_index(&mut self) {
+        let new_commit_index = self.peer_manager.lock().unwrap().quorum_match_index(self.commit_index);
+        if new_commit_index <= self.commit_index {
+            return;
+        }
+        info!("advance commit index from {} to {}", self.commit_index, new_commit_index);
+        self.commit_index = new_commit_index;
+        // TODO 应用到状态机
     }
 
     pub fn handle_heartbeat_timeout(&mut self) {
@@ -215,7 +265,7 @@ impl Consensus {
                 self.current_term += 1;  // 任期加1
                 self.voted_for = self.server_id;  // 给自己投票
 
-                // TODO 设置下一次选举超时随机值
+                // 重置选举计时器
                 self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
 
                 // 发起投票
@@ -230,7 +280,7 @@ impl Consensus {
                     self.current_term += 1;  // 任期加1
                     self.voted_for = self.server_id;  // 给自己投票
 
-                    // TODO 设置下一次选举超时随机值
+                    // 重置选举计时器
                     self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
 
                     // 发起投票
@@ -325,7 +375,7 @@ impl Consensus {
         // 投票给候选者
         info!("Agree vote for server id {}", request.candidate_id);
         self.voted_for = request.candidate_id;
-        // TODO 重置选举计时器
+        // 重置选举计时器
         self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
 
         proto::RequestVoteResp {
@@ -333,6 +383,7 @@ impl Consensus {
             vote_granted: true
         }
     }
+
 
     pub fn handle_install_snapshot(&mut self, request: &proto::InstallSnapshotReq) -> proto::InstallSnapshotResp {
         info!("handle_install_snapshot");
