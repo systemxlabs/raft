@@ -31,7 +31,7 @@ impl Log {
         }
     }
 
-    pub fn append(&mut self, term: u64, entry_data: Vec<LogEntryData>) {
+    pub fn append_data(&mut self, term: u64, entry_data: Vec<LogEntryData>) {
         // 防止并发插入相同index的log entry
         if let Ok(_) = self.append_mutex.lock() {
             for entry in entry_data {
@@ -42,6 +42,18 @@ impl Log {
                     data: entry.1,
                 };
                 self.entries.push(log_entry);
+            }
+        } else {
+            error!("append log entry failed due to lock failure");
+            return;
+        }
+    }
+
+    pub fn append_entries(&mut self, entries: Vec<proto::LogEntry>) {
+        // 防止并发插入相同index的log entry
+        if let Ok(_) = self.append_mutex.lock() {
+            for entry in entries {
+                self.entries.push(entry);
             }
         } else {
             error!("append log entry failed due to lock failure");
@@ -82,6 +94,13 @@ impl Log {
     pub fn last_term(&self) -> u64 {
         self.entries.last().map(|entry| entry.term).unwrap_or(0)
     }
+
+    pub fn truncate_suffix(&mut self, last_index_kept: u64) {
+        if last_index_kept < self.start_index {
+            return;
+        }
+        self.entries.truncate((last_index_kept - self.start_index + 1) as usize);
+    }
 }
 
 
@@ -105,5 +124,17 @@ mod tests {
         assert_eq!(log.pack_entries(1).len(), 2);
         assert_eq!(log.pack_entries(2).len(), 1);
         assert_eq!(log.pack_entries(3).len(), 0);
+    }
+
+    #[test]
+    fn test_truncate_suffix() {
+        let mut log = super::Log::new(2);
+        log.append_data(1, vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())]);
+        log.append_data(1, vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())]);
+        log.append_data(1, vec![(super::proto::EntryType::Data, "test3".as_bytes().to_vec())]);
+
+        log.truncate_suffix(3);
+        assert_eq!(log.entries().len(), 2);
+
     }
 }

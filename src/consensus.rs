@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use logging::*;
 
 #[derive(Debug, PartialEq)]
-enum State {
+pub enum State {
     Follower,
     Candidate,
     Leader,
@@ -13,19 +13,19 @@ enum State {
 
 #[derive(Debug)]
 pub struct Consensus {
-    server_id: u64,
-    server_addr: String,
-    current_term: u64,
-    state: State,
+    pub server_id: u64,
+    pub server_addr: String,
+    pub current_term: u64,
+    pub state: State,
+    pub voted_for: u64,
+    pub commit_index: u64,
+    pub last_applied: u64,
+    pub leader_id: u64,
+    pub peer_manager: peer::PeerManager,
+    pub log: log::Log,
     pub election_timer: Arc<Mutex<timer::Timer>>,
     pub heartbeat_timer: Arc<Mutex<timer::Timer>>,
     pub snapshot_timer: Arc<Mutex<timer::Timer>>,
-    voted_for: u64,
-    commit_index: u64,
-    last_applied: u64,
-    leader_id: u64,
-    peer_manager: peer::PeerManager,
-    log: log::Log,
     rpc_client: rpc::Client,  // TODO 可以将RPC Client移到peer中
     tokio_runtime: tokio::runtime::Runtime,
 }
@@ -70,7 +70,7 @@ impl Consensus {
         info!("replicate data: {}", &data);
 
         // 存入 log entry
-        self.log.append(self.current_term, vec![(r#type, data.as_bytes().to_vec())]);
+        self.log.append_data(self.current_term, vec![(r#type, data.as_bytes().to_vec())]);
 
         // 将 log entry 发送到 peer 节点
         self.append_entries(false);
@@ -164,9 +164,11 @@ impl Consensus {
                 last_log_index: self.log.last_index(),
                 last_log_term: self.log.last_term(),
             };
-            // TODO 发送投票请求
+
+            // 发送投票请求
             if let Ok(resp) = self.tokio_runtime.block_on(self.rpc_client.request_vote(req, peer.server_addr.clone())) {
                 info!("request vote to {:?} resp: {:?}", &peer.server_addr, &resp);
+                
                 // 对方任期比自己大，退为follower
                 if resp.term > self.current_term {
                     info!("peer {} has bigger term {} than self {}", &peer.server_addr, &resp.term, self.current_term);
@@ -235,7 +237,7 @@ impl Consensus {
         }
     }
 
-    fn advance_commit_index(&mut self) {
+    fn leader_advance_commit_index(&mut self) {
         let new_commit_index = self.peer_manager.quorum_match_index(self.commit_index);
         if new_commit_index <= self.commit_index {
             return;
@@ -243,6 +245,14 @@ impl Consensus {
         info!("advance commit index from {} to {}", self.commit_index, new_commit_index);
         self.commit_index = new_commit_index;
         // TODO 应用到状态机
+    }
+
+    fn follower_advance_commit_index(&mut self, leader_commit_index: u64) {
+        if self.commit_index < leader_commit_index {
+            info!("follower advance commit index from {} to {}", self.commit_index, leader_commit_index);
+            self.commit_index = leader_commit_index;
+            // TODO 应用到状态机
+        }
     }
 
     pub fn handle_heartbeat_timeout(&mut self) {
@@ -297,10 +307,12 @@ impl Consensus {
             term: self.current_term,
             success: false,
         };
+
         // 比较任期
         if request.term < self.current_term {
             return refuse_resp;
         }
+
         // leader或candidate 收到term不小于自己的leader的AppendEntries RPC => 回退到Follower
         self.step_down(request.term);
 
@@ -314,19 +326,62 @@ impl Consensus {
             // TODO
         }
 
-        match self.state {
-            State::Leader => {
-                panic!("leader {} receive append entries from {}", self.server_id, request.leader_id);
-            }
-            State::Candidate => {
-                panic!("candidate {} receive append entries from {}", self.server_id, request.leader_id);
-            }
-            State::Follower => {
-            }
+        // 比较log_index
+        if request.prev_log_index > self.log.last_index() {
+            warn!("reject append entries because prev_log_index {} is greater than last index {}", request.prev_log_index, self.log.last_index());
+            return refuse_resp;
         }
+        
+        // 比较term
+        if request.prev_log_index > self.log.start_index() {
+            let log_entry = self.log.entry(request.prev_log_index).unwrap();
+            if request.prev_log_term != log_entry.term {
+                info!("reject append entries because prev_log_term {} is not equal to log entry term {}", request.prev_log_term, log_entry.term);
+                return refuse_resp;
+            }
+
+        }
+        
+        // entries为空 => 心跳
+        if request.entries.is_empty() {
+            info!("receive heartbeat from leader {}", request.leader_id);
+            self.follower_advance_commit_index(request.leader_commit);
+            return proto::AppendEntriesResp {
+                term: self.current_term,
+                success: true,
+            };
+        }
+
+        // 日志复制
+        let mut entries_to_be_replicated: Vec<proto::LogEntry> = Vec::new();
+        let mut index = request.prev_log_index;
+        for entry in request.entries.iter() {
+            index += 1;
+            if entry.index != index {  // TODO 排序entries
+                error!("request entries index is not incremental");
+                return refuse_resp;
+            }
+            if index < self.log.start_index() {
+                continue;
+            }
+            if self.log.last_index() >= index {
+                let log_entry = self.log.entry(index).unwrap();
+                if log_entry.term == entry.term {
+                    continue;
+                }
+                // 删除冲突的日志
+                info!("delete conflict log entry, index: {}, term: {}", index, log_entry.term);
+                let last_index_kept = index - 1;
+                self.log.truncate_suffix(last_index_kept);
+            }
+            entries_to_be_replicated.push(entry.clone());
+        }
+        self.log.append_entries(entries_to_be_replicated);
+        self.follower_advance_commit_index(request.leader_commit);
+
         proto::AppendEntriesResp {
+            term: self.current_term,
             success: true,
-            term: 1,
         }
     }
 

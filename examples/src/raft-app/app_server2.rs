@@ -10,8 +10,15 @@ fn main () {
     ];
     let consensus: Arc<Mutex<raft::consensus::Consensus>> = raft::start(2, 9002, peers);
 
-    // consensus.lock().unwrap().replicate("hello".to_string());
+    let mut count = 0;
     loop {
-        
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        count += 1;
+
+        let mut consensus = consensus.lock().unwrap();
+        if consensus.state == raft::consensus::State::Leader {
+            consensus.replicate(raft::proto::EntryType::Data, format!("{}", count));
+        }
+        println!("consensus details: {:#?}", consensus);
     }
 }
