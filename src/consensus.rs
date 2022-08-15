@@ -24,7 +24,7 @@ pub struct Consensus {
     commit_index: u64,
     last_applied: u64,
     leader_id: u64,
-    peer_manager: Arc<Mutex<peer::PeerManager>>,
+    peer_manager: peer::PeerManager,
     log: log::Log,
     rpc_client: rpc::Client,  // TODO 可以将RPC Client移到peer中
     tokio_runtime: tokio::runtime::Runtime,
@@ -47,7 +47,7 @@ impl Consensus {
             commit_index: 0,  // 已提交日志索引，从0开始单调递增
             last_applied: 0,  // 已应用日志索引，从0开始单调递增
             leader_id: config::NONE_SERVER_ID,
-            peer_manager: Arc::new(Mutex::new(peer::PeerManager::new())),
+            peer_manager: peer::PeerManager::new(),
             log: log::Log::new(1),
             rpc_client: rpc::Client{},
             tokio_runtime,
@@ -56,7 +56,7 @@ impl Consensus {
         // TODO 加载snapshot
 
         // TODO 初始化其他服务器peers
-        consensus.peer_manager.lock().unwrap().add_peers(peers);
+        consensus.peer_manager.add_peers(peers);
 
         Arc::new(Mutex::new(consensus))
     }
@@ -89,17 +89,16 @@ impl Consensus {
         }
 
         // TODO 并行发送附加日志请求
-        let mut peer_manager = self.peer_manager.clone();
-        let mut peer_manager = peer_manager.lock().unwrap();
-        let mut peers = peer_manager.peers_mut();
-        for peer in peers.iter_mut() {
-            self.append_entries_to_peer(peer, heartbeat);
+        let peer_ids = self.peer_manager.peer_ids();
+        for peer_server_id in peer_ids.iter() {
+            self.append_entries_to_peer(peer_server_id.clone(), heartbeat);
         }
         
         true
     }
 
-    fn append_entries_to_peer(&mut self, peer: &mut peer::Peer, heartbeat: bool) -> bool {
+    fn append_entries_to_peer(&mut self, peer_server_id: u64, heartbeat: bool) -> bool {
+        let peer = self.peer_manager.peer(peer_server_id).unwrap();
         let entries: Vec<proto::LogEntry> = match heartbeat {
             true => {self.log.pack_entries(peer.next_index)},
             false => {Vec::new()}
@@ -155,10 +154,9 @@ impl Consensus {
         let mut vote_granted_count = 0;
 
         // TODO 并行发送投票请求
-        let mut peer_manager = self.peer_manager.clone();
-        let mut peer_manager = peer_manager.lock().unwrap();
-        let mut peers = peer_manager.peers_mut();
-        for peer in peers.iter() {
+        let peer_ids = self.peer_manager.peer_ids();
+        for peer_server_id in peer_ids.iter() {
+            let peer = self.peer_manager.peer(peer_server_id.clone()).unwrap();
             info!("request vote to {:?}", &peer.server_addr);
             let req = proto::RequestVoteReq {
                 term: self.current_term,
@@ -183,7 +181,7 @@ impl Consensus {
                 }
 
                 // 获得多数选票（包括自己），成为leader，立即发送心跳
-                if vote_granted_count + 1 > (peers.len() / 2) {
+                if vote_granted_count + 1 > (peer_ids.len() / 2) {
                     info!("become leader");
                     self.become_leader();
                     return;
@@ -238,7 +236,7 @@ impl Consensus {
     }
 
     fn advance_commit_index(&mut self) {
-        let new_commit_index = self.peer_manager.lock().unwrap().quorum_match_index(self.commit_index);
+        let new_commit_index = self.peer_manager.quorum_match_index(self.commit_index);
         if new_commit_index <= self.commit_index {
             return;
         }

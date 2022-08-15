@@ -43,6 +43,18 @@ impl PeerManager {
         &self.peers
     }
 
+    pub fn peers_num(&self) -> usize {
+        self.peers.len()
+    }
+
+    pub fn peer_ids(&self) -> Vec<u64> {
+        self.peers.iter().map(|peer| peer.server_id).collect()
+    }
+
+    pub fn peer(&mut self, server_id: u64) -> Option<&mut Peer> {
+        self.peers.iter_mut().find(|peer| peer.server_id == server_id)
+    }
+
     // 从match_index中找到多数的match_index
     pub fn quorum_match_index(&self, leader_match_index: u64) -> u64 {
         let mut match_indexes: Vec<u64> = Vec::new();
