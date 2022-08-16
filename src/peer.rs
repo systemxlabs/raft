@@ -1,3 +1,5 @@
+use log::info;
+
 #[derive(Debug)]
 pub struct Peer {
     pub server_id: u64,
@@ -56,15 +58,15 @@ impl PeerManager {
     }
 
     // 从match_index中找到多数的match_index
-    pub fn quorum_match_index(&self, leader_match_index: u64) -> u64 {
+    pub fn quorum_match_index(&self, leader_last_index: u64) -> u64 {
         let mut match_indexes: Vec<u64> = Vec::new();
-        match_indexes.push(leader_match_index);
+        match_indexes.push(leader_last_index);
         for peer in self.peers.iter() {
             match_indexes.push(peer.match_index);
         }
         
         match_indexes.sort();
-        match_indexes.get(match_indexes.len() / 2).unwrap().clone()
+        match_indexes.get((match_indexes.len() - 1) / 2).unwrap().clone()
     }
 }
 

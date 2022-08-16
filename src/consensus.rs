@@ -15,14 +15,14 @@ pub enum State {
 pub struct Consensus {
     pub server_id: u64,
     pub server_addr: String,
-    pub current_term: u64,
+    pub current_term: u64,  // TODO 持久性状态
     pub state: State,
-    pub voted_for: u64,
+    pub voted_for: u64,  // TODO 持久性状态
     pub commit_index: u64,
     pub last_applied: u64,
     pub leader_id: u64,
     pub peer_manager: peer::PeerManager,
-    pub log: log::Log,
+    pub log: log::Log,  // TODO 持久性状态
     pub election_timer: Arc<Mutex<timer::Timer>>,
     pub heartbeat_timer: Arc<Mutex<timer::Timer>>,
     pub snapshot_timer: Arc<Mutex<timer::Timer>>,
@@ -241,7 +241,7 @@ impl Consensus {
     }
 
     fn leader_advance_commit_index(&mut self) {
-        let new_commit_index = self.peer_manager.quorum_match_index(self.commit_index);
+        let new_commit_index = self.peer_manager.quorum_match_index(self.log.last_index());
         if new_commit_index <= self.commit_index {
             return;
         }
