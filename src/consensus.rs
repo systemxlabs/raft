@@ -1,4 +1,4 @@
-use crate::{proto, timer, peer, log, rpc, util, config};
+use crate::{proto, timer, peer, log, rpc, util, config, state_machine};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Instant, Duration};
 use std::cell::RefCell;
@@ -28,11 +28,12 @@ pub struct Consensus {
     pub snapshot_timer: Arc<Mutex<timer::Timer>>,
     rpc_client: rpc::Client,  // TODO 可以将RPC Client移到peer中
     tokio_runtime: tokio::runtime::Runtime,
+    pub state_machine: Box<dyn state_machine::StateMachine>,
 }
 
 impl Consensus {
 
-    pub fn new(server_id: u64, port: u32, peers: Vec<peer::Peer>) -> Arc<Mutex<Consensus>> {
+    pub fn new(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>) -> Arc<Mutex<Consensus>> {
 
         let tokio_runtime = tokio::runtime::Runtime::new().unwrap();
         let mut consensus = Consensus { 
@@ -51,6 +52,7 @@ impl Consensus {
             log: log::Log::new(1),
             rpc_client: rpc::Client{},
             tokio_runtime,
+            state_machine,
         };
 
         // TODO 加载snapshot
@@ -134,6 +136,7 @@ impl Consensus {
                 // 更新 next_index 和 match_index
                 peer.match_index = prev_log_index + entries_num as u64;
                 peer.next_index = peer.match_index + 1;
+                self.leader_advance_commit_index();
                 return true;
             }
             false => {
@@ -243,15 +246,31 @@ impl Consensus {
             return;
         }
         info!("advance commit index from {} to {}", self.commit_index, new_commit_index);
+
+        // 应用到状态机
+        for index in self.commit_index + 1 .. new_commit_index + 1 {
+            let entry = self.log.entry(index).unwrap();
+            if entry.r#type() == proto::EntryType::Data {
+                info!("apply data entry: {:?}", entry);
+                self.state_machine.apply(&entry.data);
+            }
+        }
         self.commit_index = new_commit_index;
-        // TODO 应用到状态机
     }
 
     fn follower_advance_commit_index(&mut self, leader_commit_index: u64) {
         if self.commit_index < leader_commit_index {
             info!("follower advance commit index from {} to {}", self.commit_index, leader_commit_index);
+
+            // 应用到状态机
+            for index in self.commit_index + 1 .. leader_commit_index + 1 {
+                let entry = self.log.entry(index).unwrap();
+                if entry.r#type() == proto::EntryType::Data {
+                    info!("apply data entry: {:?}", entry);
+                    self.state_machine.apply(&entry.data);
+                }
+            }
             self.commit_index = leader_commit_index;
-            // TODO 应用到状态机
         }
     }
 
