@@ -28,7 +28,7 @@ fn main () {
 
         let mut consensus = consensus.lock().unwrap();
         if consensus.state == raft::consensus::State::Leader {
-            consensus.replicate(raft::proto::EntryType::Data, format!("{}", count));
+            consensus.replicate(raft::proto::EntryType::Data, format!("{}", count).as_bytes().to_vec());
         }
         println!("consensus details: {:#?}", consensus);
     }

@@ -64,15 +64,15 @@ impl Consensus {
     }
 
     // 上层应用请求复制数据
-    pub fn replicate(&mut self, r#type: proto::EntryType, data: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn replicate(&mut self, r#type: proto::EntryType, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         if self.state != State::Leader {
             error!("replicate should be processed by leader");
             return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "not leader")));
         }
-        info!("replicate data: {}", &data);
+        info!("replicate data: {:?}", &data);
 
         // 存入 log entry
-        self.log.append_data(self.current_term, vec![(r#type, data.as_bytes().to_vec())]);
+        self.log.append_data(self.current_term, vec![(r#type, data)]);
 
         // 将 log entry 发送到 peer 节点
         self.append_entries(false);
@@ -235,7 +235,7 @@ impl Consensus {
         self.state = State::Leader;
         self.leader_id = self.server_id;
         // 添加NOOP日志
-        if let Err(e) = self.replicate(proto::EntryType::Noop, config::NONE_DATA.to_string()) {
+        if let Err(e) = self.replicate(proto::EntryType::Noop, config::NONE_DATA.as_bytes().to_vec()) {
             error!("add noop entry failed after becoming leader, error: {:?}", e);
         }
     }
@@ -510,6 +510,15 @@ impl Consensus {
     
     pub fn handle_set_configuration(&mut self, request: &proto::SetConfigurationReq) -> proto::SetConfigurationResp {
         info!("handle_set_configuration");
+
+        // 新增Cold,new日志条目
+        let mut old_new_configuration = log::Configuration::new();
+        old_new_configuration.append_new_servers(request.new_servers.as_ref());
+        old_new_configuration.append_old_peers(self.peer_manager.peers());
+        old_new_configuration.old_servers.push(log::ServerInfo(self.server_id, self.server_addr.clone()));
+
+        self.replicate(proto::EntryType::Configuration, old_new_configuration.to_data());
+        
         let reply = proto::SetConfigurationResp {
             success: true
         };
