@@ -464,5 +464,55 @@ impl Consensus {
         };
         reply
     }
+
+    pub fn handle_get_leader(&mut self, request: &proto::GetLeaderReq) -> proto::GetLeaderResp {
+        if self.state == State::Leader {
+            return proto::GetLeaderResp {
+                leader: Some(proto::Server {
+                    server_id: self.server_id,
+                    server_addr: self.server_addr.clone(),
+                })
+            }
+        }
+        for peer in self.peer_manager.peers() {
+            if peer.server_id == self.leader_id {
+                return proto::GetLeaderResp {
+                    leader: Some(proto::Server {
+                        server_id: peer.server_id,
+                        server_addr: peer.server_addr.clone(),
+                    })
+                }
+            }
+        }
+        proto::GetLeaderResp {
+            leader: None
+        }
+    }
+
+    pub fn handle_get_configuration(&mut self, request: &proto::GetConfigurationReq) -> proto::GetConfigurationResp {
+        let mut servers: Vec<proto::Server> = Vec::new();
+        for peer in self.peer_manager.peers() {
+            servers.push(proto::Server {
+                server_id: peer.server_id,
+                server_addr: peer.server_addr.clone(),
+            })
+        }
+        servers.push(proto::Server {
+            server_id: self.server_id,
+            server_addr: self.server_addr.clone(),
+        });
+
+        let reply = proto::GetConfigurationResp {
+            servers
+        };
+        reply
+    }
     
+    pub fn handle_set_configuration(&mut self, request: &proto::SetConfigurationReq) -> proto::SetConfigurationResp {
+        info!("handle_set_configuration");
+        let reply = proto::SetConfigurationResp {
+            success: true
+        };
+        reply
+    }
 }

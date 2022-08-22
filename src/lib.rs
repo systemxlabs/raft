@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
+use logging::*;
 pub extern crate log as logging;
 pub extern crate rand;
 pub extern crate lazy_static;
@@ -27,12 +28,13 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     let consensus = consensus::Consensus::new(server_id, port, peers, state_machine);
 
     // 启动 rpc server
-    let server = rpc::Server {
-        consensus: consensus.clone(),
-    };
+    // let server = rpc::Server {
+        // consensus: consensus.clone(),
+    // };
+    let consensus_clone = consensus.clone();
     std::thread::spawn(move || {
         let addr = format!("[::1]:{}", port);
-        if let Err(_) = rpc::start_server(addr.as_str(), server) {
+        if let Err(_) = rpc::start_server(addr.as_str(), consensus_clone) {
             panic!("tonic rpc server started failed");
         }
     });
@@ -40,18 +42,28 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     // 启动 timer
     let weak_consensus = Arc::downgrade(&consensus);
     consensus.lock().unwrap().heartbeat_timer.lock().unwrap().schedule(config::HEARTBEAT_INTERVAL, move || {
-        // TODO 处理weak引用不存在情况
-        weak_consensus.upgrade().unwrap().lock().unwrap().handle_heartbeat_timeout();
+        if let Some(consensus) = weak_consensus.upgrade() {
+            consensus.lock().unwrap().handle_heartbeat_timeout();
+        } else {
+            error!("heartbeat timer can't call callback function due to consensus was dropped");
+        }
     });
     let weak_consensus = Arc::downgrade(&consensus);
     consensus.lock().unwrap().election_timer.lock().unwrap().schedule(util::rand_election_timeout(), move || {
-        weak_consensus.upgrade().unwrap().lock().unwrap().handle_election_timeout();
+        if let Some(consensus) = weak_consensus.upgrade() {
+            consensus.lock().unwrap().handle_election_timeout();
+        } else {
+            error!("election timer can't call callback function due to consensus was dropped");
+        }
     });
     let weak_consensus = Arc::downgrade(&consensus);
     consensus.lock().unwrap().snapshot_timer.lock().unwrap().schedule(config::SNAPSHOT_INTERVAL, move || {
-        weak_consensus.upgrade().unwrap().lock().unwrap().handle_snapshot_timeout();
+        if let Some(consensus) = weak_consensus.upgrade() {
+            consensus.lock().unwrap().handle_snapshot_timeout();
+        } else {
+            error!("snapshot timer can't call callback function due to consensus was dropped");
+        }
     });
-
 
     consensus
 }

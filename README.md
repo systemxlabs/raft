@@ -19,6 +19,7 @@ Raft 协议
 - [wenweihu86/raft-java](https://github.com/wenweihu86/raft-java)
 - [baidu/braft](https://github.com/baidu/braft)
 - [b站 MIT 6.824课程](https://www.bilibili.com/video/BV1R7411t71W)
+- [如何的才能更好地学习 MIT6.824 分布式系统课程？ - 知乎](https://www.zhihu.com/question/29597104)
 
 ## 问题
 **1.如果发生网络分区，另一个区会产生一个新的leader，那么客户端提交到旧leader的请求为什么不会导致错误？**
@@ -41,8 +42,11 @@ Raft 协议
 
 **8.为什么选举出leader后，leader要立刻append一条Noop日志条目？**
 
-由于leader只能提交当前任期产生的日志（前面任期日志通过日志匹配特性间接提交）。假如新leader当选后，长时间没有新日志产生，会造成前面任期日志一直得到不提交。因此在当选leader后立刻添加一个Noop日志，可以防止这种情况发生。
+- 由于leader只能提交当前任期产生的日志（前面任期日志通过日志匹配特性间接提交）。假如新leader当选后，长时间没有新日志产生，会造成前面任期日志一直得到不提交。因此在当选leader后立刻添加一个Noop日志，可以防止这种情况发生。
+- 集群成员变更采用单步变更，如果leader在没有append任何非配置类型日志条目，就直接append配置类型日志条目，会出现覆盖已提交日志条目bug。具体见 https://blog.openacid.com/distributed/raft-bug/ 。raft作者给的修正方法就是：新leader必须提交一条自己的term的日志, 才允许接变更日志。
 
 **9.leader在复制到多数节点后，在回复客户端前宕机了，此时客户端收到超时进行重试，如何保证重试幂等性以防止同一数据复制多次？**
 
 **10.multi-raft是如何实现的？**
+
+**11.业界成熟raft实现（如etcd、tikv等）中有哪些原raft论文之外的优化方式？**

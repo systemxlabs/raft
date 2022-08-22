@@ -53,10 +53,38 @@ message InstallSnapshotResp {
   uint64 term = 1;                // 当前任期，便于领导人更新自己
 }
 
+message Server {
+  uint64 server_id = 1;
+  string server_addr = 2;
+}
+
+message GetLeaderReq {}
+message GetLeaderResp {
+  Server leader = 1;
+}
+
+message GetConfigurationReq {}
+message GetConfigurationResp {
+  repeated Server servers = 1;
+}
+
+message SetConfigurationReq {
+  repeated Server new_servers = 1;
+}
+message SetConfigurationResp {
+  bool success = 1;
+}
 
 // Raft共识算法RPC服务
 service ConsensusRpc {
-  rpc AppendEntries (AppendEntriesReq) returns (AppendEntriesResp) {}          // 附加日志条目RPC
-  rpc RequestVote (RequestVoteReq) returns (RequestVoteResp) {}                // 请求选票RPC
-  rpc InstallSnapshot (InstallSnapshotReq) returns (InstallSnapshotResp) {}    // 安装快照RPC
+  rpc AppendEntries (AppendEntriesReq) returns (AppendEntriesResp) {}            // 附加日志条目RPC
+  rpc RequestVote (RequestVoteReq) returns (RequestVoteResp) {}                  // 请求选票RPC
+  rpc InstallSnapshot (InstallSnapshotReq) returns (InstallSnapshotResp) {}      // 安装快照RPC
+}
+
+// 集群管理RPC
+service ManagementRpc {
+  rpc GetLeader (GetLeaderReq) returns (GetLeaderResp) {}                        // 获取集群leader信息
+  rpc GetConfiguration (GetConfigurationReq) returns (GetConfigurationResp) {}   // 获取集群成员配置
+  rpc SetConfiguration (SetConfigurationReq) returns (SetConfigurationResp) {}   // 更新集群成员配置
 }
