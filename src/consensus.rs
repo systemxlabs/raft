@@ -74,6 +74,11 @@ impl Consensus {
         // 存入 log entry
         self.log.append_data(self.current_term, vec![(r#type, data)]);
 
+        // 立刻应用Configuration条目
+        if r#type == proto::EntryType::Configuration {
+            self.apply_configuration();
+        }
+
         // 将 log entry 发送到 peer 节点
         self.append_entries(false);
 
@@ -250,10 +255,18 @@ impl Consensus {
         // 应用到状态机
         for index in self.commit_index + 1 .. new_commit_index + 1 {
             let entry = self.log.entry(index).unwrap();
-            if entry.r#type() == proto::EntryType::Data {
-                info!("apply data entry: {:?}", entry);
-                self.state_machine.apply(&entry.data);
+            match entry.r#type() {
+                proto::EntryType::Data => {
+                    info!("apply data entry: {:?}", entry);
+                    self.state_machine.apply(&entry.data);
+                },
+                proto::EntryType::Configuration => {
+                    info!("append Cnew entry when Cold,new commited, Cold,new: {:?}", entry);
+                    self.append_configuration(None);
+                },
+                proto::EntryType::Noop => {},
             }
+            
         }
         self.commit_index = new_commit_index;
     }
@@ -271,6 +284,43 @@ impl Consensus {
                 }
             }
             self.commit_index = leader_commit_index;
+        }
+    }
+
+    // TODO 应用Configuration条目
+    fn apply_configuration(&mut self) {
+        let last_configuration = self.log.last_configuration();
+    }
+
+    // 添加Configuration日志条目
+    fn append_configuration(&mut self, new_servers: Option<&Vec<proto::Server>>) -> bool {
+        match new_servers {
+            // 添加Cold,new日志条目
+            Some(servers) => {
+                let mut old_new_configuration = log::Configuration::new();
+                old_new_configuration.append_new_servers(servers);
+                old_new_configuration.append_old_peers(self.peer_manager.peers());
+                old_new_configuration.old_servers.push(log::ServerInfo(self.server_id, self.server_addr.clone()));
+
+                match self.replicate(proto::EntryType::Configuration, old_new_configuration.to_data()) {
+                    Ok(_) => { return true; },
+                    Err(_) => { return false; },
+                };
+            },
+
+            // 添加Cnew日志条目
+            None => {
+                let old_new_configuration = self.log.last_configuration();
+                if old_new_configuration.old_servers.is_empty() || old_new_configuration.new_servers.is_empty() {
+                    panic!("There is no Cold,new before when appending Cnew");
+                }
+                let new_configuration = old_new_configuration.gen_new_configuration();
+
+                match self.replicate(proto::EntryType::Configuration, new_configuration.to_data()) {
+                    Ok(_) => { return true; },
+                    Err(_) => {return false; },
+                };
+            }
         }
     }
 
@@ -509,19 +559,27 @@ impl Consensus {
     }
     
     pub fn handle_set_configuration(&mut self, request: &proto::SetConfigurationReq) -> proto::SetConfigurationResp {
-        info!("handle_set_configuration");
+        let refuse_reply = proto::SetConfigurationResp { success: false };
+
+        if request.new_servers.is_empty() {
+            return refuse_reply;
+        }
+
+        let last_configuration =  self.log.last_configuration();
+        // 最近一次Cold,new还没提交Cnew
+        if !last_configuration.old_servers.is_empty() && !last_configuration.new_servers.is_empty(){
+            return refuse_reply;
+        }
+
+        // TODO 新增成员catch up
 
         // 新增Cold,new日志条目
-        let mut old_new_configuration = log::Configuration::new();
-        old_new_configuration.append_new_servers(request.new_servers.as_ref());
-        old_new_configuration.append_old_peers(self.peer_manager.peers());
-        old_new_configuration.old_servers.push(log::ServerInfo(self.server_id, self.server_addr.clone()));
-
-        self.replicate(proto::EntryType::Configuration, old_new_configuration.to_data());
+        let success = self.append_configuration(Some(request.new_servers.as_ref()));
         
-        let reply = proto::SetConfigurationResp {
-            success: true
-        };
-        reply
+        // TODO 新增Cnew日志条目
+
+        proto::SetConfigurationResp {
+            success
+        }
     }
 }

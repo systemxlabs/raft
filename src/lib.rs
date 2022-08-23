@@ -28,9 +28,6 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     let consensus = consensus::Consensus::new(server_id, port, peers, state_machine);
 
     // 启动 rpc server
-    // let server = rpc::Server {
-        // consensus: consensus.clone(),
-    // };
     let consensus_clone = consensus.clone();
     std::thread::spawn(move || {
         let addr = format!("[::1]:{}", port);

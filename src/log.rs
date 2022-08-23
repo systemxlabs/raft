@@ -16,7 +16,7 @@ lazy_static::lazy_static! {
 
 pub type LogEntryData = (proto::EntryType, Vec<u8>);
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct ServerInfo(pub u64, pub String);
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -44,6 +44,12 @@ impl Configuration {
         for peer in peers.iter() {
             self.new_servers.push(ServerInfo(peer.server_id, peer.server_addr.clone()));
         }
+    }
+    pub fn gen_new_configuration(&self) -> Configuration {
+        if self.old_servers.is_empty() || self.new_servers.is_empty() {
+            panic!("Only Cold,new can generate Cnew");
+        }
+        Configuration { old_servers: Vec::new(), new_servers: self.new_servers.clone() }
     }
 }
 
@@ -133,6 +139,18 @@ impl Log {
             return;
         }
         self.entries.truncate((last_index_kept - self.start_index + 1) as usize);
+    }
+
+    pub fn last_configuration(&self) -> Configuration {
+        for entry in self.entries().iter().rev() {
+            if entry.r#type() == proto::EntryType::Configuration {
+                return Configuration::from_data(&entry.data.as_ref());
+            }
+        }
+        return Configuration {
+            old_servers: Vec::new(),
+            new_servers: Vec::new()
+        };
     }
 }
 

@@ -3,10 +3,9 @@ syntax="proto3";
 package raft;
 
 enum EntryType {
-  UKNOWN = 0;
-  CONFIGURATION = 1;
-  DATA = 2;
-  NOOP = 3;                       // 无操作
+  CONFIGURATION = 0;
+  DATA = 1;
+  NOOP = 2;                       // 无操作
 }
 
 message LogEntry {
