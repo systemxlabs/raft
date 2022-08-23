@@ -78,11 +78,15 @@ impl proto::management_rpc_server::ManagementRpc for Server {
     }
 
     async fn set_configuration(&self, request: tonic::Request<proto::SetConfigurationReq>) -> Result<tonic::Response<proto::SetConfigurationResp>, tonic::Status> {
-        let addr = request.remote_addr().unwrap();
-        info!("Handle set configuration from {:?}, request: {:?}", &addr, &request);
-        let response = tonic::Response::new(self.consensus.lock().unwrap().handle_set_configuration(&request.into_inner()));
-        info!("Handle set configuration from {:?}, response: {:?}", &addr, &response);
-        Ok(response)
+        let consensus = self.consensus.clone();
+        // 避免在 tokio runtime 里起另一个 tokio runtime 失败
+        tokio::task::spawn_blocking(move || {
+            let addr = request.remote_addr().unwrap();
+            info!("Handle set configuration from {:?}, request: {:?}", &addr, &request);
+            let response = tonic::Response::new(consensus.lock().unwrap().handle_set_configuration(&request.into_inner()));
+            info!("Handle set configuration from {:?}, response: {:?}", &addr, &response);
+            Ok(response)
+        }).await.unwrap()
     }
 }
 

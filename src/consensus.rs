@@ -251,39 +251,52 @@ impl Consensus {
             return;
         }
         info!("advance commit index from {} to {}", self.commit_index, new_commit_index);
+        let prev_commit_index = self.commit_index;
 
-        // 应用到状态机
-        for index in self.commit_index + 1 .. new_commit_index + 1 {
+        for index in prev_commit_index + 1 .. new_commit_index + 1 {
             let entry = self.log.entry(index).unwrap();
             match entry.r#type() {
+                // 应用到状态机
                 proto::EntryType::Data => {
                     info!("apply data entry: {:?}", entry);
                     self.state_machine.apply(&entry.data);
+                    self.commit_index += 1;
                 },
+                // 新增Cnew配置条目
                 proto::EntryType::Configuration => {
-                    info!("append Cnew entry when Cold,new commited, Cold,new: {:?}", entry);
-                    self.append_configuration(None);
+                    self.commit_index += 1;
+                    let configuration = log::Configuration::from_data(&entry.data);
+                    if !configuration.old_servers.is_empty() && !configuration.new_servers.is_empty() {
+                        info!("append Cnew entry when Cold,new commited, Cold,new: {:?}", &configuration);
+                        self.append_configuration(None);
+                    }
                 },
-                proto::EntryType::Noop => {},
+                proto::EntryType::Noop => {
+                    self.commit_index += 1;
+                },
             }
-            
         }
-        self.commit_index = new_commit_index;
     }
 
     fn follower_advance_commit_index(&mut self, leader_commit_index: u64) {
         if self.commit_index < leader_commit_index {
             info!("follower advance commit index from {} to {}", self.commit_index, leader_commit_index);
-
+            
+            let prev_commit_inndex = self.commit_index;
             // 应用到状态机
-            for index in self.commit_index + 1 .. leader_commit_index + 1 {
-                let entry = self.log.entry(index).unwrap();
-                if entry.r#type() == proto::EntryType::Data {
-                    info!("apply data entry: {:?}", entry);
-                    self.state_machine.apply(&entry.data);
+            for index in prev_commit_inndex + 1 .. leader_commit_index + 1 {
+                if let Some(entry) = self.log.entry(index) {
+                    if entry.r#type() == proto::EntryType::Data {
+                        info!("apply data entry: {:?}", entry);
+                        self.state_machine.apply(&entry.data);
+                    }
+                    self.commit_index += 1;
+                } else {
+                    // 可能日志还没catchup
+                    break;
                 }
+
             }
-            self.commit_index = leader_commit_index;
         }
     }
 

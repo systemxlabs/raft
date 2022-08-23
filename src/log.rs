@@ -42,7 +42,7 @@ impl Configuration {
     }
     pub fn append_old_peers(&mut self, peers: &Vec<peer::Peer>) {
         for peer in peers.iter() {
-            self.new_servers.push(ServerInfo(peer.server_id, peer.server_addr.clone()));
+            self.old_servers.push(ServerInfo(peer.server_id, peer.server_addr.clone()));
         }
     }
     pub fn gen_new_configuration(&self) -> Configuration {
