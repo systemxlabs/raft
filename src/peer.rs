@@ -1,4 +1,5 @@
 use log::info;
+use crate::config;
 
 #[derive(Debug)]
 pub struct Peer {
@@ -7,6 +8,7 @@ pub struct Peer {
     pub next_index: u64,
     pub match_index: u64,
     pub vote_granted: bool,
+    pub configuration_state: config::ConfigurationState,
 }
 
 impl Peer {
@@ -17,6 +19,7 @@ impl Peer {
             next_index: 1,  // TODO
             match_index: 0,
             vote_granted: false,
+            configuration_state: config::ConfigurationState::new(),
         }
     }
 }
@@ -82,6 +85,7 @@ mod tests {
             next_index: 3,
             match_index: 2,
             vote_granted: false,
+            configuration_state: crate::config::ConfigurationState::new(),
         };
         let peer2 = super::Peer {
             server_id: 2,
@@ -89,6 +93,7 @@ mod tests {
             next_index: 2,
             match_index: 2,
             vote_granted: false,
+            configuration_state: crate::config::ConfigurationState::new(),
         };
         peer_manager.add_peers(vec![peer1, peer2]);
         println!("{:?}", peer_manager);

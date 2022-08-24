@@ -23,6 +23,7 @@ pub struct Consensus {
     pub leader_id: u64,
     pub peer_manager: peer::PeerManager,
     pub log: log::Log,  // TODO 持久性状态
+    pub configuration_state: config::ConfigurationState,
     pub election_timer: Arc<Mutex<timer::Timer>>,
     pub heartbeat_timer: Arc<Mutex<timer::Timer>>,
     pub snapshot_timer: Arc<Mutex<timer::Timer>>,
@@ -50,6 +51,7 @@ impl Consensus {
             leader_id: config::NONE_SERVER_ID,
             peer_manager: peer::PeerManager::new(),
             log: log::Log::new(1),
+            configuration_state: config::ConfigurationState::new(),
             rpc_client: rpc::Client{},
             tokio_runtime,
             state_machine,
@@ -265,7 +267,7 @@ impl Consensus {
                 // 新增Cnew配置条目
                 proto::EntryType::Configuration => {
                     self.commit_index += 1;
-                    let configuration = log::Configuration::from_data(&entry.data);
+                    let configuration = config::Configuration::from_data(&entry.data);
                     if !configuration.old_servers.is_empty() && !configuration.new_servers.is_empty() {
                         info!("append Cnew entry when Cold,new commited, Cold,new: {:?}", &configuration);
                         self.append_configuration(None);
@@ -310,10 +312,10 @@ impl Consensus {
         match new_servers {
             // 添加Cold,new日志条目
             Some(servers) => {
-                let mut old_new_configuration = log::Configuration::new();
+                let mut old_new_configuration = config::Configuration::new();
                 old_new_configuration.append_new_servers(servers);
                 old_new_configuration.append_old_peers(self.peer_manager.peers());
-                old_new_configuration.old_servers.push(log::ServerInfo(self.server_id, self.server_addr.clone()));
+                old_new_configuration.old_servers.push(config::ServerInfo(self.server_id, self.server_addr.clone()));
 
                 match self.replicate(proto::EntryType::Configuration, old_new_configuration.to_data()) {
                     Ok(_) => { return true; },

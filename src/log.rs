@@ -1,8 +1,7 @@
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
-use crate::peer;
-use crate::proto;
+use crate::{peer, proto, config};
 use crate::logging::*;
 
 lazy_static::lazy_static! {
@@ -16,42 +15,7 @@ lazy_static::lazy_static! {
 
 pub type LogEntryData = (proto::EntryType, Vec<u8>);
 
-#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
-pub struct ServerInfo(pub u64, pub String);
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct Configuration {
-    pub old_servers: Vec<ServerInfo>,
-    pub new_servers: Vec<ServerInfo>
-}
-
-impl Configuration {
-    pub fn new() -> Configuration {
-        Configuration { old_servers: Vec::new(), new_servers: Vec::new() }
-    }
-    pub fn from_data(data: &Vec<u8>) -> Configuration {
-        bincode::deserialize(data).expect("Failed to convert vec<u8> to configuration")
-    }
-    pub fn to_data(&self) -> Vec<u8> {
-        bincode::serialize(self).expect("Failed to convert configuration to vec<u8>")
-    }
-    pub fn append_new_servers(&mut self, new_servers: &Vec<proto::Server>) {
-        for server in new_servers.iter() {
-            self.new_servers.push(ServerInfo(server.server_id, server.server_addr.clone()));
-        }
-    }
-    pub fn append_old_peers(&mut self, peers: &Vec<peer::Peer>) {
-        for peer in peers.iter() {
-            self.old_servers.push(ServerInfo(peer.server_id, peer.server_addr.clone()));
-        }
-    }
-    pub fn gen_new_configuration(&self) -> Configuration {
-        if self.old_servers.is_empty() || self.new_servers.is_empty() {
-            panic!("Only Cold,new can generate Cnew");
-        }
-        Configuration { old_servers: Vec::new(), new_servers: self.new_servers.clone() }
-    }
-}
 
 #[derive(Debug)]
 pub struct Log {
@@ -141,13 +105,13 @@ impl Log {
         self.entries.truncate((last_index_kept - self.start_index + 1) as usize);
     }
 
-    pub fn last_configuration(&self) -> Configuration {
+    pub fn last_configuration(&self) -> config::Configuration {
         for entry in self.entries().iter().rev() {
             if entry.r#type() == proto::EntryType::Configuration {
-                return Configuration::from_data(&entry.data.as_ref());
+                return config::Configuration::from_data(&entry.data.as_ref());
             }
         }
-        return Configuration {
+        return config::Configuration {
             old_servers: Vec::new(),
             new_servers: Vec::new()
         };
@@ -187,17 +151,5 @@ mod tests {
         log.truncate_suffix(3);
         assert_eq!(log.entries().len(), 2);
 
-    }
-
-    #[test]
-    fn test_configuration() {
-        let mut configuration = super::Configuration::new();
-        configuration.old_servers.push(super::ServerInfo(1, "[::1]:9001".to_string()));
-        configuration.new_servers.push(super::ServerInfo(2, "[::1]:9002".to_string()));
-
-        let ser_data = configuration.to_data();
-        let de_configuration = super::Configuration::from_data(&ser_data);
-
-        assert_eq!(de_configuration, configuration);
     }
 }
