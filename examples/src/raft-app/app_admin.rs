@@ -17,6 +17,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>  {
     let set_configuration_req = tonic::Request::new(raft::proto::SetConfigurationReq {
         new_servers: vec![
             raft::proto::Server {
+                server_id: 1,
+                server_addr: "[::1]:9001".to_string(),
+            },
+            raft::proto::Server {
+                server_id: 2,
+                server_addr: "[::1]:9002".to_string(),
+            },
+            raft::proto::Server {
                 server_id: 3,
                 server_addr: "[::1]:9003".to_string(),
             },

@@ -302,9 +302,26 @@ impl Consensus {
         }
     }
 
-    // TODO 应用Configuration条目
+    // 应用Configuration条目
     fn apply_configuration(&mut self) {
         let last_configuration = self.log.last_configuration();
+
+        // 更新peers列表
+        let mut new_peers = Vec::new();
+        for server_info in last_configuration.new_servers.iter() {
+            if !self.peer_manager.contains(server_info.0) && server_info.0 != self.server_id {
+                new_peers.push(peer::Peer::new(server_info.0, server_info.1.clone()));
+            }
+        }
+        self.peer_manager.add_peers(new_peers);
+
+        // TODO 下线？
+        
+        // 更新节点配置状态
+        for peer in self.peer_manager.peers_mut().iter_mut() {
+            peer.configuration_state = last_configuration.query_configuration_state(peer.server_id);
+        }
+        self.configuration_state = last_configuration.query_configuration_state(self.server_id);
     }
 
     // 添加Configuration日志条目
@@ -581,7 +598,7 @@ impl Consensus {
         }
 
         let last_configuration =  self.log.last_configuration();
-        // 最近一次Cold,new还没提交Cnew
+        // 最近一次Cold,new还没提交Cnew时，不能更新成员配置
         if !last_configuration.old_servers.is_empty() && !last_configuration.new_servers.is_empty(){
             return refuse_reply;
         }
@@ -590,8 +607,6 @@ impl Consensus {
 
         // 新增Cold,new日志条目
         let success = self.append_configuration(Some(request.new_servers.as_ref()));
-        
-        // TODO 新增Cnew日志条目
 
         proto::SetConfigurationResp {
             success

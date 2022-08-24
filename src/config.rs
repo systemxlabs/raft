@@ -18,7 +18,7 @@ pub const NONE_SERVER_ID: u64 = 0;
 // 空data
 pub const NONE_DATA: &'static str = "None";
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ConfigurationState {
     pub in_new: bool,  // 在Cnew配置中，正常情况都处于Cnew
     pub in_old: bool,  // 在Cold配置中，成员变更期间部分会处于Cold
@@ -65,10 +65,18 @@ impl Configuration {
         }
         Configuration { old_servers: Vec::new(), new_servers: self.new_servers.clone() }
     }
+    pub fn query_configuration_state(&self, server_id: u64) -> ConfigurationState {
+        ConfigurationState {
+            in_new: self.new_servers.iter().find(|new_server| new_server.0 == server_id).is_some(),
+            in_old: self.old_servers.iter().find(|old_server| old_server.0 == server_id).is_some(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::config::ConfigurationState;
+
     #[test]
     fn test_configuration() {
         let mut configuration = super::Configuration::new();
@@ -79,5 +87,7 @@ mod tests {
         let de_configuration = super::Configuration::from_data(&ser_data);
 
         assert_eq!(de_configuration, configuration);
+
+        assert_eq!(configuration.query_configuration_state(1), ConfigurationState { in_new: false, in_old: true} );
     }
 }

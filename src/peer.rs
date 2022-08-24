@@ -60,6 +60,10 @@ impl PeerManager {
         self.peers.iter_mut().find(|peer| peer.server_id == server_id)
     }
 
+    pub fn contains(&self, server_id: u64) -> bool {
+        self.peers.iter().find(|peer| peer.server_id == server_id).is_some()
+    }
+
     // 从match_index中找到多数的match_index
     pub fn quorum_match_index(&self, leader_last_index: u64) -> u64 {
         let mut match_indexes: Vec<u64> = Vec::new();
