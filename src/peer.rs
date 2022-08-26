@@ -64,6 +64,10 @@ impl PeerManager {
         self.peers.iter().find(|peer| peer.server_id == server_id).is_some()
     }
 
+    pub fn reset_vote(&mut self) {
+        self.peers_mut().iter_mut().for_each(|peer| peer.vote_granted = false);
+    }
+
     // 从match_index中找到多数的match_index
     pub fn quorum_match_index(&self, leader_last_index: u64) -> u64 {
         let mut match_indexes: Vec<u64> = Vec::new();
@@ -74,6 +78,47 @@ impl PeerManager {
         
         match_indexes.sort();
         match_indexes.get((match_indexes.len() - 1) / 2).unwrap().clone()
+    }
+
+    pub fn quorum_vote_granted(&self, leader_configuration_state: &config::ConfigurationState) -> bool {
+        let mut total_new_servers = 0;
+        let mut granted_new_servers = 0;
+
+        let mut total_old_servers = 0;
+        let mut granted_old_servers = 0;
+
+        if leader_configuration_state.in_new {
+            total_new_servers += 1;
+            granted_new_servers += 1;
+        }
+        if leader_configuration_state.in_old {
+            total_old_servers += 1;
+            granted_old_servers += 1;
+        }
+
+        for peer in self.peers().iter() {
+            if peer.configuration_state.in_new {
+                total_new_servers += 1;
+                if peer.vote_granted {
+                    granted_new_servers += 1;
+                }
+            }
+            if peer.configuration_state.in_old {
+                total_old_servers += 1;
+                if peer.vote_granted {
+                    granted_old_servers += 1;
+                }
+            }
+        }
+
+        // 满足联合共识
+        let new_servers_quorum = {
+            total_new_servers == 0 || granted_new_servers > (total_new_servers / 2)
+        };
+        let old_servers_quorum = {
+            total_old_servers == 0 || granted_old_servers > (total_old_servers / 2)
+        };
+        return new_servers_quorum && old_servers_quorum;
     }
 }
 

@@ -164,7 +164,9 @@ impl Consensus {
     // 请求其他节点投票
     fn request_vote(&mut self) {
         info!("start request vote");
-        let mut vote_granted_count = 0;
+
+        // 重置peer选票信息
+        self.peer_manager.reset_vote();
 
         // TODO 并行发送投票请求
         let peer_server_ids = self.peer_manager.peer_server_ids();
@@ -192,11 +194,11 @@ impl Consensus {
                 // 获得一张选票
                 if resp.vote_granted {
                     info!("peer {} vote granted", &peer.server_addr);
-                    vote_granted_count += 1;
+                    peer.vote_granted = true;
                 }
 
                 // 获得多数选票（包括自己），成为leader，立即发送心跳
-                if vote_granted_count + 1 > (peer_server_ids.len() / 2) {
+                if self.peer_manager.quorum_vote_granted(&self.configuration_state) {
                     info!("become leader");
                     self.become_leader();
                     return;
@@ -208,7 +210,7 @@ impl Consensus {
         }
 
         // 获得多数选票（包括自己），成为leader，立即发送心跳
-        if vote_granted_count + 1 > (peer_server_ids.len() / 2) {
+        if self.peer_manager.quorum_vote_granted(&self.configuration_state) {
             info!("become leader");
             self.become_leader();
             return;
@@ -391,19 +393,17 @@ impl Consensus {
             },
             State::Follower => {
                 // Follwer发起选举
-                if self.voted_for == config::NONE_SERVER_ID {
-                    info!("start election");
+                info!("start election");
 
-                    self.state = State::Candidate;  // 转为候选者
-                    self.current_term += 1;  // 任期加1
-                    self.voted_for = self.server_id;  // 给自己投票
+                self.state = State::Candidate;  // 转为候选者
+                self.current_term += 1;  // 任期加1
+                self.voted_for = self.server_id;  // 给自己投票
 
-                    // 重置选举计时器
-                    self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
+                // 重置选举计时器
+                self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
 
-                    // 发起投票
-                    self.request_vote();
-                }
+                // 发起投票
+                self.request_vote();
             },
         }
     }
