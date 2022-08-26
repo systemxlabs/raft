@@ -8,6 +8,10 @@ impl raft::state_machine::StateMachine for MyStateMachine {
     fn apply(&mut self, data: &Vec<u8>) {
         self.datas.push(data.clone());
     }
+    fn take_snapshot(&mut self) {
+    }
+    fn restore_snapshot(&mut self) {
+    }
 }
 
 fn main () {

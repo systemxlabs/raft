@@ -52,7 +52,7 @@ impl PeerManager {
         self.peers.len()
     }
 
-    pub fn peer_ids(&self) -> Vec<u64> {
+    pub fn peer_server_ids(&self) -> Vec<u64> {
         self.peers.iter().map(|peer| peer.server_id).collect()
     }
 

@@ -74,11 +74,11 @@ impl Consensus {
         info!("replicate data: {:?}", &data);
 
         // 存入 log entry
-        self.log.append_data(self.current_term, vec![(r#type, data)]);
+        self.log.append_data(self.current_term, vec![(r#type, data.clone())]);
 
         // 立刻应用Configuration条目
         if r#type == proto::EntryType::Configuration {
-            self.apply_configuration();
+            self.apply_configuration(config::Configuration::from_data(&data));
         }
 
         // 将 log entry 发送到 peer 节点
@@ -98,11 +98,14 @@ impl Consensus {
         }
 
         // TODO 并行发送附加日志请求
-        let peer_ids = self.peer_manager.peer_ids();
-        for peer_server_id in peer_ids.iter() {
+        let peer_server_ids = self.peer_manager.peer_server_ids();
+        if peer_server_ids.is_empty() {
+            self.leader_advance_commit_index();
+        }
+        for peer_server_id in peer_server_ids.iter() {
             self.append_entries_to_peer(peer_server_id.clone(), heartbeat);
         }
-        
+
         true
     }
 
@@ -164,8 +167,8 @@ impl Consensus {
         let mut vote_granted_count = 0;
 
         // TODO 并行发送投票请求
-        let peer_ids = self.peer_manager.peer_ids();
-        for peer_server_id in peer_ids.iter() {
+        let peer_server_ids = self.peer_manager.peer_server_ids();
+        for peer_server_id in peer_server_ids.iter() {
             let peer = self.peer_manager.peer(peer_server_id.clone()).unwrap();
             info!("request vote to {:?}", &peer.server_addr);
             let req = proto::RequestVoteReq {
@@ -193,7 +196,7 @@ impl Consensus {
                 }
 
                 // 获得多数选票（包括自己），成为leader，立即发送心跳
-                if vote_granted_count + 1 > (peer_ids.len() / 2) {
+                if vote_granted_count + 1 > (peer_server_ids.len() / 2) {
                     info!("become leader");
                     self.become_leader();
                     return;
@@ -202,6 +205,13 @@ impl Consensus {
             } else {
                 error!("request vote to {:?} failed", &peer.server_addr);
             }
+        }
+
+        // 获得多数选票（包括自己），成为leader，立即发送心跳
+        if vote_granted_count + 1 > (peer_server_ids.len() / 2) {
+            info!("become leader");
+            self.become_leader();
+            return;
         }
     }
 
@@ -228,6 +238,7 @@ impl Consensus {
             // 2.Leader收到RequestVote RPC => 不回退
             // 3.Candidate收到AppendEntries RPC => 回退到Follower
             // 4.Candidate收到RequestVote RPC => 不回退
+            self.leader_id = config::NONE_SERVER_ID;
         }
         // 重置选举计时器
         self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
@@ -303,12 +314,10 @@ impl Consensus {
     }
 
     // 应用Configuration条目
-    fn apply_configuration(&mut self) {
-        let last_configuration = self.log.last_configuration();
-
+    fn apply_configuration(&mut self, configuration: config::Configuration) {
         // 更新peers列表
         let mut new_peers = Vec::new();
-        for server_info in last_configuration.new_servers.iter() {
+        for server_info in configuration.new_servers.iter() {
             if !self.peer_manager.contains(server_info.0) && server_info.0 != self.server_id {
                 new_peers.push(peer::Peer::new(server_info.0, server_info.1.clone()));
             }
@@ -319,9 +328,9 @@ impl Consensus {
         
         // 更新节点配置状态
         for peer in self.peer_manager.peers_mut().iter_mut() {
-            peer.configuration_state = last_configuration.query_configuration_state(peer.server_id);
+            peer.configuration_state = configuration.query_configuration_state(peer.server_id);
         }
-        self.configuration_state = last_configuration.query_configuration_state(self.server_id);
+        self.configuration_state = configuration.query_configuration_state(self.server_id);
     }
 
     // 添加Configuration日志条目
@@ -477,7 +486,23 @@ impl Consensus {
             }
             entries_to_be_replicated.push(entry.clone());
         }
+
+        let mut configuration_entries = Vec::new();
+        for entry in entries_to_be_replicated.iter() {
+            if entry.r#type() == proto::EntryType::Configuration {
+                configuration_entries.push(entry.clone());
+            }
+        }
+
+        // 更新日志
         self.log.append_entries(entries_to_be_replicated);
+
+        // 应用配置
+        for configuration_entry in configuration_entries.iter() {
+            self.apply_configuration(config::Configuration::from_data(configuration_entry.data.as_ref()));
+        }
+        
+        // 更新commit_index
         self.follower_advance_commit_index(request.leader_commit);
 
         proto::AppendEntriesResp {

@@ -18,19 +18,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>  {
         new_servers: vec![
             raft::proto::Server {
                 server_id: 1,
-                server_addr: "[::1]:9001".to_string(),
+                server_addr: "http://[::1]:9001".to_string(),
             },
             raft::proto::Server {
                 server_id: 2,
-                server_addr: "[::1]:9002".to_string(),
+                server_addr: "http://[::1]:9002".to_string(),
             },
             raft::proto::Server {
                 server_id: 3,
-                server_addr: "[::1]:9003".to_string(),
+                server_addr: "http://[::1]:9003".to_string(),
             },
             raft::proto::Server {
                 server_id: 4,
-                server_addr: "[::1]:9004".to_string(),
+                server_addr: "http://[::1]:9004".to_string(),
             },
         ]
     });

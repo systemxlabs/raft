@@ -23,6 +23,9 @@ path = "src/raft-app/app_server2.rs"
 name = "app_server3"
 path = "src/raft-app/app_server3.rs"
 [[bin]]
+name = "app_server4"
+path = "src/raft-app/app_server4.rs"
+[[bin]]
 name = "rpc_client"
 path = "src/raft-app/rpc_client.rs"
 

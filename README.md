@@ -1,10 +1,11 @@
 # raft
-Raft 协议的 Rust 实现。
+Raft 协议的 Rust 实现。（欢迎交流~ wechat: wx597422850）
 - [x] 领导人选举
 - [x] 日志复制
 - [ ] 集群成员变化
 - [ ] 日志压缩
 - [ ] 客户端交互
+- [ ] 通过MIT6.824 lab2 raft测试
 
 Raft 协议
 - 中文：[maemual/raft-zh_cn](https://github.com/maemual/raft-zh_cn/blob/master/raft-zh_cn.md)、doc/raft-zh_cn.pdf、[OneSizeFitsQuorum/raft-thesis-zh_cn](https://github.com/OneSizeFitsQuorum/raft-thesis-zh_cn/blob/master/raft-thesis-zh_cn.md)
