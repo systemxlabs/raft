@@ -14,6 +14,12 @@ path = "src/hello-tonic/tonic_server.rs"
 name = "app_admin"
 path = "src/raft-app/app_admin.rs"
 [[bin]]
+name = "app_admin_add_server"
+path = "src/raft-app/app_admin_add_server.rs"
+[[bin]]
+name = "app_admin_remove_server"
+path = "src/raft-app/app_admin_remove_server.rs"
+[[bin]]
 name = "app_server1"
 path = "src/raft-app/app_server1.rs"
 [[bin]]

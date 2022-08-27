@@ -6,6 +6,7 @@ use crate::{peer, proto};
 // 选举超时随机范围
 pub const ELECTION_TIMEOUT_MAX_MILLIS: u64 = 15000;
 pub const ELECTION_TIMEOUT_MIN_MILLIS: u64 = 10000;
+pub const ELECTION_TIMEOUT_MIN: Duration = Duration::from_millis(ELECTION_TIMEOUT_MIN_MILLIS);
 
 // 心跳间隔时间
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(3000);
@@ -33,7 +34,7 @@ impl ConfigurationState {
 #[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct ServerInfo(pub u64, pub String);
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct Configuration {
     pub old_servers: Vec<ServerInfo>,
     pub new_servers: Vec<ServerInfo>
@@ -70,6 +71,12 @@ impl Configuration {
             in_new: self.new_servers.iter().find(|new_server| new_server.0 == server_id).is_some(),
             in_old: self.old_servers.iter().find(|old_server| old_server.0 == server_id).is_some(),
         }
+    }
+    pub fn is_configuration_old_new(&self) -> bool {
+        return !self.old_servers.is_empty() && !self.new_servers.is_empty();
+    }
+    pub fn is_configuration_new(&self) -> bool {
+        return self.old_servers.is_empty() && !self.new_servers.is_empty();
     }
 }
 

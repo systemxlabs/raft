@@ -11,6 +11,7 @@ pub struct Timer {
     name: String,
     alive: Arc<AtomicBool>,
     interval: Arc<Mutex<Duration>>,
+    pub last_reset_at: Option<Instant>,
     next_tick: Arc<Mutex<Instant>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
@@ -21,6 +22,7 @@ impl Timer {
             name: name.to_string(),
             alive: Arc::new(AtomicBool::new(false)),
             interval: Arc::new(Mutex::new(Duration::from_secs(std::u64::MAX))),
+            last_reset_at: None,
             next_tick: Arc::new(Mutex::new(Instant::now())),
             handle: None,
         }
@@ -65,6 +67,7 @@ impl Timer {
 
     pub fn reset(&mut self, interval: Duration) {
         info!("{} execute reset with interval: {:?}", self.name, &interval);
+        self.last_reset_at = Some(Instant::now());
         (*self.interval.lock().unwrap()) = interval;
         (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
     }
@@ -76,7 +79,6 @@ impl Timer {
             handle.join().unwrap();
         }
     }
-
 }
 
 

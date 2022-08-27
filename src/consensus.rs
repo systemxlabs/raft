@@ -78,7 +78,7 @@ impl Consensus {
 
         // 立刻应用Configuration条目
         if r#type == proto::EntryType::Configuration {
-            self.apply_configuration(config::Configuration::from_data(&data));
+            self.apply_configuration(config::Configuration::from_data(&data), false);
         }
 
         // 将 log entry 发送到 peer 节点
@@ -99,18 +99,32 @@ impl Consensus {
 
         // TODO 并行发送附加日志请求
         let peer_server_ids = self.peer_manager.peer_server_ids();
+        info!("start to append entries (heartbeat: {}) to peers: {:?}", heartbeat, &peer_server_ids);
         if peer_server_ids.is_empty() {
+            info!("LWZTEST 3333333 peer_server_ids: {:?}", peer_server_ids);
             self.leader_advance_commit_index();
+            info!("LWZTEST 2222222 peer_server_ids: {:?}", peer_server_ids);
         }
+        info!("LWZTEST 11111111 peer_server_ids: {:?}", peer_server_ids);
         for peer_server_id in peer_server_ids.iter() {
+            info!("LWZTEST peer id: {}", peer_server_id);
+            info!("LWZTEST peer_ids: {:?}, peer_server_ids: {:?}", self.peer_manager.peer_server_ids(), peer_server_ids);
             self.append_entries_to_peer(peer_server_id.clone(), heartbeat);
+            info!("LWZTEST 4444444 peer_server_ids: {:?}", peer_server_ids);
         }
 
         true
     }
 
     fn append_entries_to_peer(&mut self, peer_server_id: u64, heartbeat: bool) -> bool {
-        let peer = self.peer_manager.peer(peer_server_id).unwrap();
+        info!("LWZTEST 55555555 peer_server_id: {:?}", peer_server_id);
+        let peer = match self.peer_manager.peer(peer_server_id) {
+            Some(peer) => { peer },
+            None => { 
+                // 可能此时应用Cnew，已经将此peer移除
+                warn!("peer {} not found in peer_manager when appending entries", peer_server_id);
+                return false; },
+        };
         let entries: Vec<proto::LogEntry> = match heartbeat {
             true => {self.log.pack_entries(peer.next_index)},
             false => {Vec::new()}
@@ -280,8 +294,11 @@ impl Consensus {
                 // 新增Cnew配置条目
                 proto::EntryType::Configuration => {
                     self.commit_index += 1;
+
                     let configuration = config::Configuration::from_data(&entry.data);
-                    if !configuration.old_servers.is_empty() && !configuration.new_servers.is_empty() {
+                    self.apply_configuration(configuration.clone(), true);
+
+                    if configuration.is_configuration_old_new() {
                         info!("append Cnew entry when Cold,new commited, Cold,new: {:?}", &configuration);
                         self.append_configuration(None);
                     }
@@ -301,9 +318,16 @@ impl Consensus {
             // 应用到状态机
             for index in prev_commit_inndex + 1 .. leader_commit_index + 1 {
                 if let Some(entry) = self.log.entry(index) {
-                    if entry.r#type() == proto::EntryType::Data {
-                        info!("apply data entry: {:?}", entry);
-                        self.state_machine.apply(&entry.data);
+                    match entry.r#type() {
+                        proto::EntryType::Data => {
+                            info!("apply data entry: {:?}", entry);
+                            self.state_machine.apply(&entry.data);
+                        },
+                        proto::EntryType::Configuration => {
+                            let configuration = config::Configuration::from_data(&entry.data);
+                            self.apply_configuration(configuration, true);
+                        },
+                        proto::EntryType::Noop => {},
                     }
                     self.commit_index += 1;
                 } else {
@@ -316,23 +340,69 @@ impl Consensus {
     }
 
     // 应用Configuration条目
-    fn apply_configuration(&mut self, configuration: config::Configuration) {
-        // 更新peers列表
-        let mut new_peers = Vec::new();
-        for server_info in configuration.new_servers.iter() {
-            if !self.peer_manager.contains(server_info.0) && server_info.0 != self.server_id {
-                new_peers.push(peer::Peer::new(server_info.0, server_info.1.clone()));
+    fn apply_configuration(&mut self, configuration: config::Configuration, commited: bool) {
+        // 已应用配置
+
+        // Cold,new配置
+        if configuration.is_configuration_old_new() {
+            if commited {
+                info!("apply Cold,new when configuration commited");
+            } else {
+                info!("apply Cold,new when configuration appended");
+
+                // 添加new节点
+                let mut new_peers = Vec::new();
+                for server_info in configuration.new_servers.iter() {
+                    if !self.peer_manager.contains(server_info.0) && server_info.0 != self.server_id {
+                        new_peers.push(peer::Peer::new(server_info.0, server_info.1.clone()));
+                    }
+                }
+                self.peer_manager.add_peers(new_peers);
+
+                // 更新节点配置状态
+                for peer in self.peer_manager.peers_mut().iter_mut() {
+                    peer.configuration_state = configuration.query_configuration_state(peer.server_id);
+                }
+                self.configuration_state = configuration.query_configuration_state(self.server_id);
+            }
+            
+        // Cnew配置
+        } else if configuration.is_configuration_new() {
+            if commited {
+                info!("apply Cnew when configuration commited");
+                // 下线本节点（leader）
+                if !self.configuration_state.in_new && self.state == State::Leader {
+                    self.shutdown();
+                }
+
+            } else {
+                info!("apply Cnew when configuration appended");
+
+                // 更新节点配置状态
+                for peer in self.peer_manager.peers_mut().iter_mut() {
+                    peer.configuration_state = configuration.query_configuration_state(peer.server_id);
+                }
+                self.configuration_state = configuration.query_configuration_state(self.server_id);
+
+                // 移除old节点
+                let mut peer_ids_to_be_removed = Vec::new();
+                for peer in self.peer_manager.peers() {
+                    if !peer.configuration_state.in_new {
+                        peer_ids_to_be_removed.push(peer.server_id);
+                    }
+                }
+                self.peer_manager.remove_peers(peer_ids_to_be_removed);
+
+                for peer_id in self.peer_manager.peer_server_ids().iter() {
+                    info!("LWZTEST after removed, peer_id: {}", peer_id)
+                }
+
+                // 下线本节点（非leader）
+                if !self.configuration_state.in_new && self.state != State::Leader {
+                    self.shutdown();
+                }
             }
         }
-        self.peer_manager.add_peers(new_peers);
-
-        // TODO 下线？
-        
-        // 更新节点配置状态
-        for peer in self.peer_manager.peers_mut().iter_mut() {
-            peer.configuration_state = configuration.query_configuration_state(peer.server_id);
-        }
-        self.configuration_state = configuration.query_configuration_state(self.server_id);
     }
 
     // 添加Configuration日志条目
@@ -354,7 +424,7 @@ impl Consensus {
             // 添加Cnew日志条目
             None => {
                 let old_new_configuration = self.log.last_configuration();
-                if old_new_configuration.old_servers.is_empty() || old_new_configuration.new_servers.is_empty() {
+                if !old_new_configuration.is_configuration_old_new() {
                     panic!("There is no Cold,new before when appending Cnew");
                 }
                 let new_configuration = old_new_configuration.gen_new_configuration();
@@ -365,6 +435,15 @@ impl Consensus {
                 };
             }
         }
+    }
+
+    // 关闭/下线本节点
+    pub fn shutdown(&mut self) {
+        info!("shutdown this node");
+        self.heartbeat_timer.lock().unwrap().stop();
+        self.election_timer.lock().unwrap().stop();
+        self.snapshot_timer.lock().unwrap().stop();
+        // TODO 关闭 tonic server
     }
 
     pub fn handle_heartbeat_timeout(&mut self) {
@@ -499,7 +578,7 @@ impl Consensus {
 
         // 应用配置
         for configuration_entry in configuration_entries.iter() {
-            self.apply_configuration(config::Configuration::from_data(configuration_entry.data.as_ref()));
+            self.apply_configuration(config::Configuration::from_data(configuration_entry.data.as_ref()), false);
         }
         
         // 更新commit_index
@@ -517,15 +596,32 @@ impl Consensus {
             vote_granted: false,
         };
 
+        // TODO 不在peers中 ？
+        if !self.peer_manager.contains(request.candidate_id) {
+            return refuse_reply;
+        }
+
         // 比较任期
         if request.term < self.current_term {
             info!("Refuse vote for {} due to candidate's term is smaller", request.candidate_id);
             return refuse_reply;
         }
 
+        // 防止破坏性服务器（如不在Cnew中的节点）
+        if let Some(last_reset_at) = self.election_timer.lock().unwrap().last_reset_at {
+            if last_reset_at.elapsed() < config::ELECTION_TIMEOUT_MIN {
+                return refuse_reply;
+            }
+        }
+
         // leader或candidate 收到term大于自己的candidate的RequestVote RPC => 回退到Follower
         if request.term > self.current_term {
             self.step_down(request.term);
+        } else {
+            // 任期相同
+            if self.state == State::Leader || self.state == State::Candidate {
+                return refuse_reply;
+            }
         }
 
         // candidate日志是否最新
@@ -624,7 +720,7 @@ impl Consensus {
 
         let last_configuration =  self.log.last_configuration();
         // 最近一次Cold,new还没提交Cnew时，不能更新成员配置
-        if !last_configuration.old_servers.is_empty() && !last_configuration.new_servers.is_empty(){
+        if last_configuration.is_configuration_old_new() {
             return refuse_reply;
         }
 
