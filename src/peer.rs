@@ -16,7 +16,7 @@ impl Peer {
         Peer {
             server_id,
             server_addr,
-            next_index: 1,  // TODO
+            next_index: 1,  // TODO restore snapshot
             match_index: 0,
             vote_granted: false,
             configuration_state: config::ConfigurationState::new(),
@@ -69,15 +69,47 @@ impl PeerManager {
     }
 
     // 从match_index中找到多数的match_index
-    pub fn quorum_match_index(&self, leader_last_index: u64) -> u64 {
-        let mut match_indexes: Vec<u64> = Vec::new();
-        match_indexes.push(leader_last_index);
-        for peer in self.peers.iter() {
-            match_indexes.push(peer.match_index);
+    pub fn quorum_match_index(&self, leader_configuration_state: &config::ConfigurationState, leader_last_index: u64) -> u64 {
+        let mut new_match_indexes: Vec<u64> = Vec::new();
+        if leader_configuration_state.in_new {
+            new_match_indexes.push(leader_last_index);
         }
-        
-        match_indexes.sort();
-        match_indexes.get((match_indexes.len() - 1) / 2).unwrap().clone()
+        for peer in self.peers.iter() {
+            if peer.configuration_state.in_new {
+                new_match_indexes.push(peer.match_index);
+            }
+        }
+        new_match_indexes.sort();
+        // new server 满足多数派的match index
+        let new_quorum_match_index = {
+            if new_match_indexes.len() == 0 {
+                std::u64::MAX
+            } else {
+                new_match_indexes.get((new_match_indexes.len() - 1) / 2).unwrap().clone()
+            }
+        };
+
+        let mut old_match_indexes: Vec<u64> = Vec::new();
+        if leader_configuration_state.in_old {
+            old_match_indexes.push(leader_last_index);
+        }
+        for peer in self.peers.iter() {
+            if peer.configuration_state.in_old {
+                old_match_indexes.push(peer.match_index);
+            }
+        }
+        old_match_indexes.sort();
+        // old server 满足多数派的match index
+        let old_quorum_match_index = {
+            if old_match_indexes.len() == 0 {
+                std::u64::MAX
+            } else {
+                old_match_indexes.get((old_match_indexes.len() - 1) / 2).unwrap().clone()
+            }
+        };
+
+        // 满足联合共识
+        return std::cmp::min(new_quorum_match_index, old_quorum_match_index);
     }
 
     pub fn quorum_vote_granted(&self, leader_configuration_state: &config::ConfigurationState) -> bool {

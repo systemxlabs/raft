@@ -261,7 +261,7 @@ impl Consensus {
     }
 
     fn leader_advance_commit_index(&mut self) {
-        let new_commit_index = self.peer_manager.quorum_match_index(self.log.last_index());
+        let new_commit_index = self.peer_manager.quorum_match_index(&self.configuration_state, self.log.last_index());
         if new_commit_index <= self.commit_index {
             return;
         }
