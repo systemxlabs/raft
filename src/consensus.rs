@@ -101,23 +101,17 @@ impl Consensus {
         let peer_server_ids = self.peer_manager.peer_server_ids();
         info!("start to append entries (heartbeat: {}) to peers: {:?}", heartbeat, &peer_server_ids);
         if peer_server_ids.is_empty() {
-            info!("LWZTEST 3333333 peer_server_ids: {:?}", peer_server_ids);
             self.leader_advance_commit_index();
-            info!("LWZTEST 2222222 peer_server_ids: {:?}", peer_server_ids);
         }
-        info!("LWZTEST 11111111 peer_server_ids: {:?}", peer_server_ids);
+
         for peer_server_id in peer_server_ids.iter() {
-            info!("LWZTEST peer id: {}", peer_server_id);
-            info!("LWZTEST peer_ids: {:?}, peer_server_ids: {:?}", self.peer_manager.peer_server_ids(), peer_server_ids);
             self.append_entries_to_peer(peer_server_id.clone(), heartbeat);
-            info!("LWZTEST 4444444 peer_server_ids: {:?}", peer_server_ids);
         }
 
         true
     }
 
     fn append_entries_to_peer(&mut self, peer_server_id: u64, heartbeat: bool) -> bool {
-        info!("LWZTEST 55555555 peer_server_id: {:?}", peer_server_id);
         let peer = match self.peer_manager.peer(peer_server_id) {
             Some(peer) => { peer },
             None => { 
@@ -392,10 +386,6 @@ impl Consensus {
                     }
                 }
                 self.peer_manager.remove_peers(peer_ids_to_be_removed);
-
-                for peer_id in self.peer_manager.peer_server_ids().iter() {
-                    info!("LWZTEST after removed, peer_id: {}", peer_id)
-                }
 
                 // 下线本节点（非leader）
                 if !self.configuration_state.in_new && self.state != State::Leader {
