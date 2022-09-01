@@ -5,8 +5,9 @@ pub trait StateMachine: Debug + Send + 'static{
     fn apply(&mut self, data: &Vec<u8>);
 
     // 生成快照
-    fn take_snapshot(&mut self);
+    // TODO Copy-on-write
+    fn take_snapshot(&mut self, snapshot_filepath: String);
 
     // 从快照恢复
-    fn restore_snapshot(&mut self);
+    fn restore_snapshot(&mut self, snapshot_filepath: String);
 }

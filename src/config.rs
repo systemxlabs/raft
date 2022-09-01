@@ -14,6 +14,9 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(3000);
 // 快照间隔时间
 pub const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(30000);
 
+// 快照阈值（日志条目长度）
+pub const SNAPSHOT_LOG_LENGTH_THRESHOLD: usize = 10;
+
 // 空server id
 pub const NONE_SERVER_ID: u64 = 0;
 // 空data

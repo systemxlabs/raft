@@ -105,16 +105,13 @@ impl Log {
         self.entries.truncate((last_index_kept - self.start_index + 1) as usize);
     }
 
-    pub fn last_configuration(&self) -> config::Configuration {
+    pub fn last_configuration(&self) -> Option<config::Configuration> {
         for entry in self.entries().iter().rev() {
             if entry.r#type() == proto::EntryType::Configuration {
-                return config::Configuration::from_data(&entry.data.as_ref());
+                return Some(config::Configuration::from_data(&entry.data.as_ref()));
             }
         }
-        return config::Configuration {
-            old_servers: Vec::new(),
-            new_servers: Vec::new()
-        };
+        return None;
     }
 }
 

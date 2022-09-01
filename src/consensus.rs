@@ -1,4 +1,4 @@
-use crate::{proto, timer, peer, log, rpc, util, config, state_machine};
+use crate::{proto, timer, peer, log, rpc, util, config, state_machine, snapshot};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Instant, Duration};
 use std::cell::RefCell;
@@ -23,6 +23,7 @@ pub struct Consensus {
     pub leader_id: u64,
     pub peer_manager: peer::PeerManager,
     pub log: log::Log,  // TODO 持久性状态
+    pub snapshot: snapshot::Snapshot,
     pub configuration_state: config::ConfigurationState,
     pub election_timer: Arc<Mutex<timer::Timer>>,
     pub heartbeat_timer: Arc<Mutex<timer::Timer>>,
@@ -34,7 +35,7 @@ pub struct Consensus {
 
 impl Consensus {
 
-    pub fn new(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>) -> Arc<Mutex<Consensus>> {
+    pub fn new(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>, snapshot_dir: String) -> Arc<Mutex<Consensus>> {
 
         let tokio_runtime = tokio::runtime::Runtime::new().unwrap();
         let mut consensus = Consensus { 
@@ -51,6 +52,7 @@ impl Consensus {
             leader_id: config::NONE_SERVER_ID,
             peer_manager: peer::PeerManager::new(),
             log: log::Log::new(1),
+            snapshot: snapshot::Snapshot::new(snapshot_dir),
             configuration_state: config::ConfigurationState::new(),
             rpc_client: rpc::Client{},
             tokio_runtime,
@@ -414,15 +416,21 @@ impl Consensus {
             // 添加Cnew日志条目
             None => {
                 let old_new_configuration = self.log.last_configuration();
-                if !old_new_configuration.is_configuration_old_new() {
-                    panic!("There is no Cold,new before when appending Cnew");
+                match old_new_configuration {
+                    Some(old_new_configuration) => {
+                        if !old_new_configuration.is_configuration_old_new() {
+                            panic!("There is no Cold,new before when appending Cnew");
+                        }
+                        let new_configuration = old_new_configuration.gen_new_configuration();
+                        match self.replicate(proto::EntryType::Configuration, new_configuration.to_data()) {
+                            Ok(_) => { return true; },
+                            Err(_) => {return false; },
+                        };
+                    },
+                    None => {
+                        panic!("There is no Cold,new (None) before when appending Cnew");
+                    },
                 }
-                let new_configuration = old_new_configuration.gen_new_configuration();
-
-                match self.replicate(proto::EntryType::Configuration, new_configuration.to_data()) {
-                    Ok(_) => { return true; },
-                    Err(_) => {return false; },
-                };
             }
         }
     }
@@ -478,7 +486,24 @@ impl Consensus {
     }
 
     pub fn handle_snapshot_timeout(&mut self) {
-        // info!("handle_snapshot_timeout");
+        if self.log.entries().len() > config::SNAPSHOT_LOG_LENGTH_THRESHOLD {
+            info!("start to take snapshot");
+            let last_included_index = self.log.last_index();
+            let last_included_term = self.log.last_term();
+            let configuration = self.log.last_configuration();
+
+            // 写入snapshot数据
+            let snapshot_filepath = self.snapshot.gen_snapshot_filepath(last_included_index, last_included_term);
+            self.state_machine.take_snapshot(snapshot_filepath.clone());
+            if !std::path::Path::new(&snapshot_filepath).exists() {
+                error!("state machine failed to take snapshot");
+                return;
+            }
+            info!("success to take snapshot, filepath: {}", snapshot_filepath);
+
+            // 写入snapshot元数据
+            self.snapshot.task_snapshot_metadata(last_included_index, last_included_term, configuration);
+        }
     }
 
     pub fn handle_append_entries(&mut self, request: &proto::AppendEntriesReq) -> proto::AppendEntriesResp {
@@ -710,7 +735,7 @@ impl Consensus {
 
         let last_configuration =  self.log.last_configuration();
         // 最近一次Cold,new还没提交Cnew时，不能更新成员配置
-        if last_configuration.is_configuration_old_new() {
+        if last_configuration.is_some() && last_configuration.unwrap().is_configuration_old_new() {
             return refuse_reply;
         }
 

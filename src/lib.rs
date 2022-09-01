@@ -14,10 +14,10 @@ pub mod consensus;
 pub mod util;
 pub mod config;
 pub mod state_machine;
-
+pub mod snapshot;
 
 // 启动 raft server
-pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>) -> Arc<Mutex<consensus::Consensus>> {
+pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>, snapshot_dir: String) -> Arc<Mutex<consensus::Consensus>> {
     // TODO 配置日志测试
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");
@@ -25,7 +25,7 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     env_logger::init();
 
     // 创建共识模块
-    let consensus = consensus::Consensus::new(server_id, port, peers, state_machine);
+    let consensus = consensus::Consensus::new(server_id, port, peers, state_machine, snapshot_dir);
 
     // 启动 rpc server
     let consensus_clone = consensus.clone();
