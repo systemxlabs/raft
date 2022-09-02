@@ -31,9 +31,10 @@ impl Snapshot {
 
         let metadata_filepath = self.gen_snapshot_metadata_filepath(last_included_index, last_included_term);
         let mut metadata_file = std::fs::File::create(metadata_filepath.clone()).unwrap();
-        // TODO 处理错误
         let metadata_json = serde_json::to_string(self).unwrap();
-        metadata_file.write(metadata_json.as_bytes());
+        if let Err(e) = metadata_file.write(metadata_json.as_bytes()) {
+            panic!("failed to write snapshot metadata file, error: {}", e)
+        }
         info!("success to task snapshot metadata, filepath: {}", metadata_filepath);
     }
 

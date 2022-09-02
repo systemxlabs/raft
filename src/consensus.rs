@@ -447,7 +447,6 @@ impl Consensus {
     pub fn handle_heartbeat_timeout(&mut self) {
         if self.state == State::Leader {
             // 发送心跳
-            info!("handle_heartbeat_timeout");
             self.append_entries(true);
         }
     }
@@ -494,6 +493,7 @@ impl Consensus {
 
             // 写入snapshot数据
             let snapshot_filepath = self.snapshot.gen_snapshot_filepath(last_included_index, last_included_term);
+            info!("snapshot filepath: {}", &snapshot_filepath);
             self.state_machine.take_snapshot(snapshot_filepath.clone());
             if !std::path::Path::new(&snapshot_filepath).exists() {
                 error!("state machine failed to take snapshot");

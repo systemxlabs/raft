@@ -53,3 +53,7 @@ Raft 协议
 **10.multi-raft是如何实现的？**
 
 **11.业界成熟raft实现（如etcd、tikv等）中有哪些原raft论文之外的优化方式？**
+
+**12.一致性与共识理解？**
+
+TODO 参考 https://tanxinyu.work/consistency-and-consensus/

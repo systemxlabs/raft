@@ -24,6 +24,13 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     }
     env_logger::init();
 
+    // snapshot_dir 不存在进行创建
+    if !std::path::Path::new(&snapshot_dir).exists() {
+        if let Err(e) = std::fs::create_dir_all(snapshot_dir.clone()) {
+            panic!("failed to create snapshot dir, e: {}", e);
+        }
+    }
+
     // 创建共识模块
     let consensus = consensus::Consensus::new(server_id, port, peers, state_machine, snapshot_dir);
 
