@@ -19,7 +19,7 @@ pub struct Consensus {
     pub state: State,
     pub voted_for: u64,  // TODO 持久性状态
     pub commit_index: u64,
-    pub last_applied: u64,
+    pub last_applied: u64,  // TODO 更新
     pub leader_id: u64,
     pub peer_manager: peer::PeerManager,
     pub log: log::Log,  // TODO 持久性状态
@@ -60,6 +60,8 @@ impl Consensus {
         };
 
         // TODO 加载snapshot
+
+        // TODO 加载持久化状态
 
         // TODO 初始化其他服务器peers
         consensus.peer_manager.add_peers(peers);
@@ -122,24 +124,24 @@ impl Consensus {
                 return false; },
         };
         let entries: Vec<proto::LogEntry> = match heartbeat {
-            true => {self.log.pack_entries(peer.next_index)},
-            false => {Vec::new()}
+            true => { self.log.pack_entries(peer.next_index) },
+            false => { Vec::with_capacity(0) }
         };
         let entries_num = entries.len();
 
         let prev_log_index = peer.next_index - 1;
-        let prev_log = self.log.entry(prev_log_index).unwrap();
+        let prev_log_term = self.log.prev_log_term(prev_log_index, self.snapshot.last_included_index, self.snapshot.last_included_term);
         let req = proto::AppendEntriesReq {
             term: self.current_term,
             leader_id: self.server_id,
-            prev_log_index: prev_log_index,
-            prev_log_term: prev_log.term,
+            prev_log_index,
+            prev_log_term,
             entries,
             leader_commit: self.commit_index,
         };
         // 发送附加日志请求
         let resp = match self.tokio_runtime.block_on(self.rpc_client.append_entries(req, peer.server_addr.clone())) {
-            Ok(resp) => {resp},
+            Ok(resp) => { resp },
             Err(_) => {
                 error!("append entries to {} failed", &peer.server_addr);
                 return false;},
@@ -186,8 +188,8 @@ impl Consensus {
             let req = proto::RequestVoteReq {
                 term: self.current_term,
                 candidate_id: self.server_id,
-                last_log_index: self.log.last_index(),
-                last_log_term: self.log.last_term(),
+                last_log_index: self.log.last_index(self.snapshot.last_included_index),
+                last_log_term: self.log.last_term(self.snapshot.last_included_term),
             };
 
             // 发送投票请求
@@ -271,7 +273,8 @@ impl Consensus {
     }
 
     fn leader_advance_commit_index(&mut self) {
-        let new_commit_index = self.peer_manager.quorum_match_index(&self.configuration_state, self.log.last_index());
+        let new_commit_index = self.peer_manager.quorum_match_index(
+            &self.configuration_state, self.log.last_index(self.snapshot.last_included_index));
         if new_commit_index <= self.commit_index {
             return;
         }
@@ -485,10 +488,10 @@ impl Consensus {
     }
 
     pub fn handle_snapshot_timeout(&mut self) {
-        if self.log.entries().len() > config::SNAPSHOT_LOG_LENGTH_THRESHOLD {
+        if self.log.committed_entries_len(self.commit_index) > config::SNAPSHOT_LOG_LENGTH_THRESHOLD {
             info!("start to take snapshot");
-            let last_included_index = self.log.last_index();
-            let last_included_term = self.log.last_term();
+            let last_included_index = self.log.last_index(self.snapshot.last_included_index);
+            let last_included_term = self.log.last_term(self.snapshot.last_included_term);
             let configuration = self.log.last_configuration();
 
             // 写入snapshot数据
@@ -502,7 +505,10 @@ impl Consensus {
             info!("success to take snapshot, filepath: {}", snapshot_filepath);
 
             // 写入snapshot元数据
-            self.snapshot.task_snapshot_metadata(last_included_index, last_included_term, configuration);
+            self.snapshot.take_snapshot_metadata(last_included_index, last_included_term, configuration);
+
+            // 截断日志条目
+            self.log.truncate_prefix(last_included_index);
         }
     }
 
@@ -531,8 +537,8 @@ impl Consensus {
         }
 
         // 比较log_index
-        if request.prev_log_index > self.log.last_index() {
-            warn!("reject append entries because prev_log_index {} is greater than last index {}", request.prev_log_index, self.log.last_index());
+        if request.prev_log_index > self.log.last_index(self.snapshot.last_included_index) {
+            warn!("reject append entries because prev_log_index {} is greater than last index {}", request.prev_log_index, self.log.last_index(self.snapshot.last_included_index));
             return refuse_resp;
         }
         
@@ -568,7 +574,7 @@ impl Consensus {
             if index < self.log.start_index() {
                 continue;
             }
-            if self.log.last_index() >= index {
+            if self.log.last_index(self.snapshot.last_included_index) >= index {
                 let log_entry = self.log.entry(index).unwrap();
                 if log_entry.term == entry.term {
                     continue;
@@ -640,7 +646,8 @@ impl Consensus {
         }
 
         // candidate日志是否最新
-        let log_is_ok = request.term > self.log.last_term() || (request.term == self.log.last_term() && request.last_log_index >= self.log.last_index());
+        let log_is_ok = request.term > self.log.last_term(self.snapshot.last_included_term) 
+                            || (request.term == self.log.last_term(self.snapshot.last_included_term) && request.last_log_index >= self.log.last_index(self.snapshot.last_included_index));
         if !log_is_ok {
             return refuse_reply;
         }

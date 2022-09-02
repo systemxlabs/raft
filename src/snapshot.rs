@@ -6,9 +6,9 @@ use std::io::Write;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Snapshot {
-    last_included_index: u64,
-    last_included_term: u64,
-    configuration: Option<config::Configuration>,
+    pub last_included_index: u64,
+    pub last_included_term: u64,
+    pub configuration: Option<config::Configuration>,
     pub snapshot_dir: String,
 }
 
@@ -23,7 +23,7 @@ impl Snapshot {
     }
 
     // 写入 snapshot 元数据
-    pub fn task_snapshot_metadata(&mut self, last_included_index: u64, last_included_term: u64, configuration: Option<config::Configuration>) {
+    pub fn take_snapshot_metadata(&mut self, last_included_index: u64, last_included_term: u64, configuration: Option<config::Configuration>) {
         info!("start to task snapshot metadata, last_included_index: {}, last_included_term: {}, configuration: {:?}", last_included_index, last_included_term, configuration.as_ref());
         self.last_included_index = last_included_index;
         self.last_included_term = last_included_term;
