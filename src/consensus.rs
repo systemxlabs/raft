@@ -1,4 +1,4 @@
-use crate::{proto, timer, peer, log, rpc, util, config, state_machine, snapshot};
+use crate::{proto, timer, peer, log, rpc, util, config, state_machine, snapshot, metadata};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Instant, Duration};
 use std::cell::RefCell;
@@ -15,9 +15,8 @@ pub enum State {
 pub struct Consensus {
     pub server_id: u64,
     pub server_addr: String,
-    pub current_term: u64,  // TODO 持久性状态
+    pub metadata: metadata::Metadata,
     pub state: State,
-    pub voted_for: u64,  // TODO 持久性状态
     pub commit_index: u64,
     pub last_applied: u64,  // TODO 更新
     pub leader_id: u64,
@@ -35,18 +34,17 @@ pub struct Consensus {
 
 impl Consensus {
 
-    pub fn new(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>, snapshot_dir: String) -> Arc<Mutex<Consensus>> {
+    pub fn new(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>, snapshot_dir: String, metadata_dir: String) -> Arc<Mutex<Consensus>> {
 
         let tokio_runtime = tokio::runtime::Runtime::new().unwrap();
         let mut consensus = Consensus { 
             server_id,
             server_addr: format!("[::1]:{}", port),
-            current_term: 0,  // 任期从 0 开始单调递增
+            metadata: metadata::Metadata::reload(metadata_dir),  // 加载raft元数据
             state: State::Follower,
             election_timer: Arc::new(Mutex::new(timer::Timer::new("election_timer"))),
             heartbeat_timer: Arc::new(Mutex::new(timer::Timer::new("heartbeat_timer"))),
             snapshot_timer: Arc::new(Mutex::new(timer::Timer::new("snapshot_timer"))),
-            voted_for: config::NONE_SERVER_ID,
             commit_index: 0,  // 已提交日志索引，从0开始单调递增
             last_applied: 0,  // 已应用日志索引，从0开始单调递增
             leader_id: config::NONE_SERVER_ID,
@@ -59,7 +57,16 @@ impl Consensus {
             state_machine,
         };
 
-        // TODO 加载snapshot
+        // TODO 
+        // consensus.log
+
+        // 加载snapshot 元数据
+        consensus.snapshot.reload_metadata();
+        
+        // 加载snapshot到状态机
+        if let Some(snapshot_filepath) = consensus.snapshot.latest_snapshot_filepath() {
+            consensus.state_machine.restore_snapshot(snapshot_filepath);
+        }
 
         // TODO 加载持久化状态
 
@@ -78,7 +85,7 @@ impl Consensus {
         info!("replicate data: {:?}", &data);
 
         // 存入 log entry
-        self.log.append_data(self.current_term, vec![(r#type, data.clone())]);
+        self.log.append_data(self.metadata.current_term, vec![(r#type, data.clone())]);
 
         // 立刻应用Configuration条目
         if r#type == proto::EntryType::Configuration {
@@ -132,7 +139,7 @@ impl Consensus {
         let prev_log_index = peer.next_index - 1;
         let prev_log_term = self.log.prev_log_term(prev_log_index, self.snapshot.last_included_index, self.snapshot.last_included_term);
         let req = proto::AppendEntriesReq {
-            term: self.current_term,
+            term: self.metadata.current_term,
             leader_id: self.server_id,
             prev_log_index,
             prev_log_term,
@@ -148,7 +155,7 @@ impl Consensus {
         };
 
         // 比较任期
-        if resp.term > self.current_term {
+        if resp.term > self.metadata.current_term {
             self.step_down(resp.term);
             return false;
         }
@@ -186,7 +193,7 @@ impl Consensus {
             let peer = self.peer_manager.peer(peer_server_id.clone()).unwrap();
             info!("request vote to {:?}", &peer.server_addr);
             let req = proto::RequestVoteReq {
-                term: self.current_term,
+                term: self.metadata.current_term,
                 candidate_id: self.server_id,
                 last_log_index: self.log.last_index(self.snapshot.last_included_index),
                 last_log_term: self.log.last_term(self.snapshot.last_included_term),
@@ -197,8 +204,8 @@ impl Consensus {
                 info!("request vote to {:?} resp: {:?}", &peer.server_addr, &resp);
                 
                 // 对方任期比自己大，退为follower
-                if resp.term > self.current_term {
-                    info!("peer {} has bigger term {} than self {}", &peer.server_addr, &resp.term, self.current_term);
+                if resp.term > self.metadata.current_term {
+                    info!("peer {} has bigger term {} than self {}", &peer.server_addr, &resp.term, self.metadata.current_term);
                     self.state = State::Follower;
                     return;
                 }
@@ -236,15 +243,15 @@ impl Consensus {
 
     // 回退状态
     fn step_down(&mut self, new_term: u64) {
-        info!("step down to term {}, current term: {}", new_term, self.current_term);
-        if new_term < self.current_term {
-            error!("step down failed because new term {} is less than current term {}", new_term, self.current_term);
+        info!("step down to term {}, current term: {}", new_term, self.metadata.current_term);
+        if new_term < self.metadata.current_term {
+            error!("step down failed because new term {} is less than current term {}", new_term, self.metadata.current_term);
             return;
         }
         self.state = State::Follower;
-        if new_term > self.current_term {
-            self.current_term = new_term;
-            self.voted_for = config::NONE_SERVER_ID;
+        if new_term > self.metadata.current_term {
+            self.metadata.update_current_term(new_term);
+            self.metadata.update_voted_for(config::NONE_SERVER_ID);
             self.leader_id = config::NONE_SERVER_ID;
         } else {
             // new_term == self.current_term 情况
@@ -461,8 +468,8 @@ impl Consensus {
                 // 候选者再次发起选举
                 info!("start election again");
 
-                self.current_term += 1;  // 任期加1
-                self.voted_for = self.server_id;  // 给自己投票
+                self.metadata.update_current_term(self.metadata.current_term + 1);  // 任期加1
+                self.metadata.update_voted_for(self.server_id);  // 给自己投票
 
                 // 重置选举计时器
                 self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
@@ -475,8 +482,8 @@ impl Consensus {
                 info!("start election");
 
                 self.state = State::Candidate;  // 转为候选者
-                self.current_term += 1;  // 任期加1
-                self.voted_for = self.server_id;  // 给自己投票
+                self.metadata.update_current_term(self.metadata.current_term + 1);  // 任期加1
+                self.metadata.update_voted_for(self.server_id);  // 给自己投票
 
                 // 重置选举计时器
                 self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
@@ -514,12 +521,12 @@ impl Consensus {
 
     pub fn handle_append_entries(&mut self, request: &proto::AppendEntriesReq) -> proto::AppendEntriesResp {
         let refuse_resp = proto::AppendEntriesResp {
-            term: self.current_term,
+            term: self.metadata.current_term,
             success: false,
         };
 
         // 比较任期
-        if request.term < self.current_term {
+        if request.term < self.metadata.current_term {
             return refuse_resp;
         }
 
@@ -557,7 +564,7 @@ impl Consensus {
             info!("receive heartbeat from leader {}", request.leader_id);
             self.follower_advance_commit_index(request.leader_commit);
             return proto::AppendEntriesResp {
-                term: self.current_term,
+                term: self.metadata.current_term,
                 success: true,
             };
         }
@@ -606,14 +613,14 @@ impl Consensus {
         self.follower_advance_commit_index(request.leader_commit);
 
         proto::AppendEntriesResp {
-            term: self.current_term,
+            term: self.metadata.current_term,
             success: true,
         }
     }
 
     pub fn handle_request_vote(&mut self, request: &proto::RequestVoteReq) -> proto::RequestVoteResp {
         let refuse_reply = proto::RequestVoteResp {
-            term: self.current_term,
+            term: self.metadata.current_term,
             vote_granted: false,
         };
 
@@ -623,7 +630,7 @@ impl Consensus {
         }
 
         // 比较任期
-        if request.term < self.current_term {
+        if request.term < self.metadata.current_term {
             info!("Refuse vote for {} due to candidate's term is smaller", request.candidate_id);
             return refuse_reply;
         }
@@ -636,7 +643,7 @@ impl Consensus {
         }
 
         // leader或candidate 收到term大于自己的candidate的RequestVote RPC => 回退到Follower
-        if request.term > self.current_term {
+        if request.term > self.metadata.current_term {
             self.step_down(request.term);
         } else {
             // 任期相同
@@ -653,8 +660,8 @@ impl Consensus {
         }
 
         // 已投给其他candidate
-        if self.voted_for != config::NONE_SERVER_ID && self.voted_for != request.candidate_id {
-            info!("Refuse vote for {} due to already voted for {}", request.candidate_id, self.voted_for);
+        if self.metadata.voted_for != config::NONE_SERVER_ID && self.metadata.voted_for != request.candidate_id {
+            info!("Refuse vote for {} due to already voted for {}", request.candidate_id, self.metadata.voted_for);
             return refuse_reply;
         }
 
@@ -671,12 +678,12 @@ impl Consensus {
 
         // 投票给候选者
         info!("Agree vote for server id {}", request.candidate_id);
-        self.voted_for = request.candidate_id;
+        self.metadata.update_voted_for(request.candidate_id);
         // 重置选举计时器
         self.election_timer.lock().unwrap().reset(util::rand_election_timeout());
 
         proto::RequestVoteResp {
-            term: self.current_term,
+            term: self.metadata.current_term,
             vote_granted: true
         }
     }

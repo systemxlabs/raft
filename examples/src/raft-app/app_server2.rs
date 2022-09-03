@@ -29,8 +29,9 @@ fn main () {
         raft::peer::Peer::new(3, "http://[::1]:9003".to_string()),
     ];
     let state_machine = Box::new(MyStateMachine { datas: Vec::new() });
-    let snapshot_dir = format!("{}/{}", std::env::current_dir().unwrap().to_str().unwrap(), ".data/app_server2");
-    let consensus: Arc<Mutex<raft::consensus::Consensus>> = raft::start(2, 9002, peers, state_machine, snapshot_dir);
+    let snapshot_dir = format!("{}/{}", std::env::current_dir().unwrap().to_str().unwrap(), ".snapshot/app_server2");
+    let metadata_dir = format!("{}/{}", std::env::current_dir().unwrap().to_str().unwrap(), ".metadata/app_server2");
+    let consensus: Arc<Mutex<raft::consensus::Consensus>> = raft::start(2, 9002, peers, state_machine, snapshot_dir, metadata_dir);
 
     let mut count = 0;
     loop {

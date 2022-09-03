@@ -23,6 +23,10 @@ Raft 协议
 - [b站 MIT 6.824课程](https://www.bilibili.com/video/BV1R7411t71W)
 - [如何的才能更好地学习 MIT6.824 分布式系统课程？ - 知乎](https://www.zhihu.com/question/29597104)
 
+TODO 待看
+- https://tanxinyu.work/raft/
+- https://zhuanlan.zhihu.com/p/420278350
+
 ## 问题
 **1.如果发生网络分区，另一个区会产生一个新的leader，那么客户端提交到旧leader的请求为什么不会导致错误？**
 

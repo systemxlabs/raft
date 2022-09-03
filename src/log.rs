@@ -16,7 +16,6 @@ lazy_static::lazy_static! {
 pub type LogEntryData = (proto::EntryType, Vec<u8>);
 
 
-
 #[derive(Debug)]
 pub struct Log {
     entries: Vec<proto::LogEntry>,

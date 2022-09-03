@@ -15,14 +15,22 @@ pub mod util;
 pub mod config;
 pub mod state_machine;
 pub mod snapshot;
+mod metadata;
 
 // 启动 raft server
-pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>, snapshot_dir: String) -> Arc<Mutex<consensus::Consensus>> {
+pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: Box<dyn state_machine::StateMachine>, snapshot_dir: String, metadata_dir: String) -> Arc<Mutex<consensus::Consensus>> {
     // TODO 配置日志测试
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");
     }
     env_logger::init();
+
+    // metadata_dir 不存在进行创建
+    if !std::path::Path::new(&metadata_dir).exists() {
+        if let Err(e) = std::fs::create_dir_all(metadata_dir.clone()) {
+            panic!("failed to create metadata dir, e: {}", e);
+        }
+    }
 
     // snapshot_dir 不存在进行创建
     if !std::path::Path::new(&snapshot_dir).exists() {
@@ -32,7 +40,7 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     }
 
     // 创建共识模块
-    let consensus = consensus::Consensus::new(server_id, port, peers, state_machine, snapshot_dir);
+    let consensus = consensus::Consensus::new(server_id, port, peers, state_machine, snapshot_dir, metadata_dir);
 
     // 启动 rpc server
     let consensus_clone = consensus.clone();
