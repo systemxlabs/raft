@@ -40,7 +40,7 @@ impl Consensus {
         let mut consensus = Consensus { 
             server_id,
             server_addr: format!("[::1]:{}", port),
-            metadata: metadata::Metadata::reload(metadata_dir),  // 加载raft元数据
+            metadata: metadata::Metadata::new(metadata_dir.clone()),
             state: State::Follower,
             election_timer: Arc::new(Mutex::new(timer::Timer::new("election_timer"))),
             heartbeat_timer: Arc::new(Mutex::new(timer::Timer::new("heartbeat_timer"))),
@@ -49,7 +49,7 @@ impl Consensus {
             last_applied: 0,  // 已应用日志索引，从0开始单调递增
             leader_id: config::NONE_SERVER_ID,
             peer_manager: peer::PeerManager::new(),
-            log: log::Log::new(1),  // TODO 加载raft日志
+            log: log::Log::new(1, metadata_dir),
             snapshot: snapshot::Snapshot::new(snapshot_dir),
             configuration_state: config::ConfigurationState::new(),
             rpc_client: rpc::Client{},
@@ -57,8 +57,11 @@ impl Consensus {
             state_machine,
         };
 
-        // TODO 
-        // consensus.log
+        // 加载raft元数据
+        consensus.metadata.reload();
+
+        // 加载raft日志
+        consensus.log.reload();
 
         // 加载snapshot 元数据
         consensus.snapshot.reload_metadata();

@@ -12,27 +12,20 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    pub fn new(metadata_dir: String) -> Metadata {
+        Metadata { current_term: 0, voted_for: config::NONE_SERVER_ID, metadata_dir }
+    }
     // 从硬盘中加载或新建
-    pub fn reload(metadata_dir: String) -> Metadata {
-        let filepath = Metadata::gen_metadata_filepath(&metadata_dir);
+    pub fn reload(&mut self) {
+        let filepath = Metadata::gen_metadata_filepath(&self.metadata_dir);
 
         if std::path::Path::new(&filepath).exists() {
             let mut metadata_file = std::fs::File::open(filepath).unwrap();
             let mut metadata_json = String::new();
             metadata_file.read_to_string(&mut metadata_json).expect("failed to read raft metadata");
             let metadata: Metadata = serde_json::from_str(metadata_json.as_str()).unwrap();
-            return Metadata {
-                current_term: metadata.current_term,
-                voted_for: metadata.voted_for,
-                metadata_dir
-            };
-
-        } else {
-            return Metadata {
-                current_term: 0,
-                voted_for: config::NONE_SERVER_ID,
-                metadata_dir
-            };
+            self.current_term = metadata.current_term;
+            self.voted_for = metadata.voted_for;
         }
     }
 

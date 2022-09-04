@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::io::Write;
+use std::io::{Write, Read};
 
 #[derive(Debug)]
 struct MyStateMachine {
@@ -17,6 +17,13 @@ impl raft::state_machine::StateMachine for MyStateMachine {
         }
     }
     fn restore_snapshot(&mut self, snapshot_filepath: String) {
+        if std::path::Path::new(&snapshot_filepath).exists() {
+            let mut snapshot_file = std::fs::File::open(snapshot_filepath).unwrap();
+            let mut snapshot_json = String::new();
+            snapshot_file.read_to_string(&mut snapshot_json).expect("failed to read snapshot");
+            let datas: Vec<Vec<u8>> = serde_json::from_str(snapshot_json.as_str()).unwrap();
+            self.datas = datas;
+        }
     }
 }
 
