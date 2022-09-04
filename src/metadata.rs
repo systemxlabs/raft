@@ -12,6 +12,7 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    // 从硬盘中加载或新建
     pub fn reload(metadata_dir: String) -> Metadata {
         let filepath = Metadata::gen_metadata_filepath(&metadata_dir);
 
@@ -49,6 +50,7 @@ impl Metadata {
         self.dump();
     }
 
+    // 将元数据持久化
     pub fn dump(&self) {
         let metadata_filepath = Metadata::gen_metadata_filepath(&self.metadata_dir);
         let mut metadata_file = std::fs::File::create(metadata_filepath).unwrap();

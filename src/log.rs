@@ -16,7 +16,7 @@ lazy_static::lazy_static! {
 pub type LogEntryData = (proto::EntryType, Vec<u8>);
 
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Log {
     entries: Vec<proto::LogEntry>,
     start_index: u64,
@@ -113,6 +113,7 @@ impl Log {
         return self.entry(prev_log_index).unwrap().term;
     }
 
+    // 截掉后续不匹配日志
     pub fn truncate_suffix(&mut self, last_index_kept: u64) {
         if last_index_kept < self.start_index {
             return;
@@ -120,6 +121,7 @@ impl Log {
         self.entries.truncate((last_index_kept - self.start_index + 1) as usize);
     }
 
+    // 截掉前面已快照日志
     pub fn truncate_prefix(&mut self, last_included_index: u64) {
         if last_included_index < self.start_index {
             return;
@@ -142,6 +144,11 @@ impl Log {
             }
         }
         return None;
+    }
+
+    // TODO 保存日志到硬盘
+    pub fn dump() {
+
     }
 }
 

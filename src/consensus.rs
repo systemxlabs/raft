@@ -49,7 +49,7 @@ impl Consensus {
             last_applied: 0,  // 已应用日志索引，从0开始单调递增
             leader_id: config::NONE_SERVER_ID,
             peer_manager: peer::PeerManager::new(),
-            log: log::Log::new(1),
+            log: log::Log::new(1),  // TODO 加载raft日志
             snapshot: snapshot::Snapshot::new(snapshot_dir),
             configuration_state: config::ConfigurationState::new(),
             rpc_client: rpc::Client{},
@@ -67,8 +67,6 @@ impl Consensus {
         if let Some(snapshot_filepath) = consensus.snapshot.latest_snapshot_filepath() {
             consensus.state_machine.restore_snapshot(snapshot_filepath);
         }
-
-        // TODO 加载持久化状态
 
         // TODO 初始化其他服务器peers
         consensus.peer_manager.add_peers(peers);
@@ -358,9 +356,9 @@ impl Consensus {
 
                 // 添加new节点
                 let mut new_peers = Vec::new();
-                for server_info in configuration.new_servers.iter() {
-                    if !self.peer_manager.contains(server_info.0) && server_info.0 != self.server_id {
-                        new_peers.push(peer::Peer::new(server_info.0, server_info.1.clone()));
+                for server in configuration.new_servers.iter() {
+                    if !self.peer_manager.contains(server.server_id) && server.server_id != self.server_id {
+                        new_peers.push(peer::Peer::new(server.server_id, server.server_addr.clone()));
                     }
                 }
                 self.peer_manager.add_peers(new_peers);
@@ -415,7 +413,10 @@ impl Consensus {
                 let mut old_new_configuration = config::Configuration::new();
                 old_new_configuration.append_new_servers(servers);
                 old_new_configuration.append_old_peers(self.peer_manager.peers());
-                old_new_configuration.old_servers.push(config::ServerInfo(self.server_id, self.server_addr.clone()));
+                old_new_configuration.old_servers.push(proto::Server{
+                    server_id: self.server_id, 
+                    server_addr: self.server_addr.clone()
+                });
 
                 match self.replicate(proto::EntryType::Configuration, old_new_configuration.to_data()) {
                     Ok(_) => { return true; },
@@ -434,7 +435,7 @@ impl Consensus {
                         let new_configuration = old_new_configuration.gen_new_configuration();
                         match self.replicate(proto::EntryType::Configuration, new_configuration.to_data()) {
                             Ok(_) => { return true; },
-                            Err(_) => {return false; },
+                            Err(_) => { return false; },
                         };
                     },
                     None => {

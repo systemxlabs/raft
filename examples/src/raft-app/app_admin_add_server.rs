@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 async fn main() -> Result<(), Box<dyn std::error::Error>>  {
     println!("Hello, world!");
 
-    let mut client = raft::proto::management_rpc_client::ManagementRpcClient::connect("http://[::1]:9002").await?;
+    let mut client = raft::proto::management_rpc_client::ManagementRpcClient::connect("http://[::1]:9001").await?;
 
     let set_configuration_req = tonic::Request::new(raft::proto::SetConfigurationReq {
         new_servers: vec![
