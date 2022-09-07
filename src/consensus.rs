@@ -18,10 +18,10 @@ pub struct Consensus {
     pub metadata: metadata::Metadata,
     pub state: State,
     pub commit_index: u64,
-    pub last_applied: u64,  // TODO 更新
+    pub last_applied: u64,
     pub leader_id: u64,
     pub peer_manager: peer::PeerManager,
-    pub log: log::Log,  // TODO 持久性状态
+    pub log: log::Log,
     pub snapshot: snapshot::Snapshot,
     pub configuration_state: config::ConfigurationState,
     pub election_timer: Arc<Mutex<timer::Timer>>,
@@ -71,8 +71,8 @@ impl Consensus {
             consensus.state_machine.restore_snapshot(snapshot_filepath);
         }
 
-        // TODO 初始化其他服务器peers
-        consensus.peer_manager.add_peers(peers);
+        // 初始化其他服务器peers
+        consensus.peer_manager.add_peers(peers, consensus.log.last_index(consensus.snapshot.last_included_index));
 
         Arc::new(Mutex::new(consensus))
     }
@@ -289,6 +289,7 @@ impl Consensus {
         info!("advance commit index from {} to {}", self.commit_index, new_commit_index);
         let prev_commit_index = self.commit_index;
 
+        // TODO commit_index 增长不是应用到状态机后才增长
         for index in prev_commit_index + 1 .. new_commit_index + 1 {
             let entry = self.log.entry(index).unwrap();
             match entry.r#type() {
@@ -296,6 +297,7 @@ impl Consensus {
                 proto::EntryType::Data => {
                     info!("apply data entry: {:?}", entry);
                     self.state_machine.apply(&entry.data);
+                    self.last_applied = entry.index;
                     self.commit_index += 1;
                 },
                 // 新增Cnew配置条目
@@ -329,6 +331,7 @@ impl Consensus {
                         proto::EntryType::Data => {
                             info!("apply data entry: {:?}", entry);
                             self.state_machine.apply(&entry.data);
+                            self.last_applied = entry.index;
                         },
                         proto::EntryType::Configuration => {
                             let configuration = config::Configuration::from_data(&entry.data);
@@ -364,7 +367,7 @@ impl Consensus {
                         new_peers.push(peer::Peer::new(server.server_id, server.server_addr.clone()));
                     }
                 }
-                self.peer_manager.add_peers(new_peers);
+                self.peer_manager.add_peers(new_peers, self.log.last_index(self.snapshot.last_included_index));
 
                 // 更新节点配置状态
                 for peer in self.peer_manager.peers_mut().iter_mut() {
@@ -578,7 +581,7 @@ impl Consensus {
         let mut index = request.prev_log_index;
         for entry in request.entries.iter() {
             index += 1;
-            if entry.index != index {  // TODO 排序entries
+            if entry.index != index {  // 默认request.entries是有序递增的
                 error!("request entries index is not incremental");
                 return refuse_resp;
             }

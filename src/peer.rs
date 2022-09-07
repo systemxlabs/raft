@@ -5,8 +5,8 @@ use crate::config;
 pub struct Peer {
     pub server_id: u64,
     pub server_addr: String,
-    pub next_index: u64,
-    pub match_index: u64,
+    pub next_index: u64,  // 初始值为领导人最后的日志条目的索引+1
+    pub match_index: u64,  // 初始值为0，单调递增
     pub vote_granted: bool,
     pub configuration_state: config::ConfigurationState,
 }
@@ -16,7 +16,7 @@ impl Peer {
         Peer {
             server_id,
             server_addr,
-            next_index: 1,  // TODO restore snapshot
+            next_index: 1,
             match_index: 0,
             vote_granted: false,
             configuration_state: config::ConfigurationState::new(),
@@ -36,7 +36,10 @@ impl PeerManager {
         }
     }
 
-    pub fn add_peers(&mut self, peers: Vec<Peer>) {
+    pub fn add_peers(&mut self, mut peers: Vec<Peer>, last_log_index: u64) {
+        for peer in peers.iter_mut() {
+            peer.next_index = last_log_index + 1;
+        }
         self.peers.extend(peers);
     }
 
@@ -184,7 +187,7 @@ mod tests {
             vote_granted: false,
             configuration_state: crate::config::ConfigurationState::new(),
         };
-        peer_manager.add_peers(vec![peer1, peer2]);
+        peer_manager.add_peers(vec![peer1, peer2], 0);
         println!("{:?}", peer_manager);
         assert_eq!(peer_manager.peers().len(), 2);
     }
