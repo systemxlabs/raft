@@ -2,6 +2,7 @@ use crate::{proto, timer, peer, log, rpc, util, config, state_machine, snapshot,
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Instant, Duration};
 use std::cell::RefCell;
+use std::io::{Read, Write, Seek};
 use logging::*;
 
 #[derive(Debug, PartialEq)]
@@ -123,14 +124,23 @@ impl Consensus {
         true
     }
 
-    fn append_entries_to_peer(&mut self, peer_server_id: u64, heartbeat: bool) -> bool {
-        let peer = match self.peer_manager.peer(peer_server_id) {
+    fn append_entries_to_peer(&mut self, peer_id: u64, heartbeat: bool) -> bool {
+        let peer = match self.peer_manager.peer(peer_id) {
             Some(peer) => { peer },
             None => { 
                 // 可能此时应用Cnew，已经将此peer移除
-                warn!("peer {} not found in peer_manager when appending entries", peer_server_id);
+                warn!("peer {} not found in peer_manager when appending entries", peer_id);
                 return false; },
         };
+
+        // 是否需要安装快照
+        let need_install_snapshot = !heartbeat && peer.next_index < self.log.start_index();
+        if need_install_snapshot {
+            info!("change to install snapshot for peer {}", peer_id);
+            self.install_snapshot(peer_id);
+            return true;
+        }
+
         let entries: Vec<proto::LogEntry> = match heartbeat {
             true => { self.log.pack_entries(peer.next_index) },
             false => { Vec::with_capacity(0) }
@@ -237,9 +247,79 @@ impl Consensus {
         }
     }
 
-    // TODO 安装快照到其他节点
-    fn install_snapshot(&self) {
-        unimplemented!();
+    // 安装快照到其他节点
+    fn install_snapshot(&mut self, peer_id: u64) {
+        // TODO 加锁
+        let peer = self.peer_manager.peer(peer_id).unwrap();
+
+        let snapshot_filepath = match self.snapshot.latest_snapshot_filepath() {
+            Some(filepath) => { filepath },
+            None => { return; }
+        };
+        let mut snapshot_file = std::fs::File::open(snapshot_filepath.clone()).unwrap();
+        let snapshot_size = snapshot_file.metadata().unwrap().len();
+        info!("install snapshot to peer {}, snapshot_filepath: {}, snapshot_size: {}", peer_id, &snapshot_filepath, snapshot_size);
+
+        let mut is_done = false;
+        let mut offset = 0;
+
+        // 循环发送快照数据
+        loop {
+
+            // 读取文件chunk
+            let mut data: Vec<u8> = {
+                if offset + (config::SNAPSHOT_TRUNK_SIZE as u64) < snapshot_size {
+                    vec![0u8; config::SNAPSHOT_TRUNK_SIZE]
+                } else {
+                    is_done = true;
+                    vec![0u8; (snapshot_size - offset) as usize]
+                }
+            };
+            let data_cap = data.capacity();
+
+            if let Err(e) = snapshot_file.seek(std::io::SeekFrom::Start(offset)) {
+                error!("install snapshot to {:?} failed to seek, e: {}", &peer.server_addr, e);
+                break;
+            }
+            if let Err(e) = snapshot_file.read_exact(&mut data) {
+                error!("install snapshot to {:?} failed to read_exact, e: {}", &peer.server_addr, e);
+                break;
+            }
+
+            let req = proto::InstallSnapshotReq {
+                term: self.metadata.current_term,
+                leader_id: self.server_id,
+                last_included_index: self.snapshot.last_included_index,
+                last_included_term: self.snapshot.last_included_term,
+                offset,
+                data,
+                done: is_done
+            };
+
+            // 发送rpc请求
+            match self.tokio_runtime.block_on(self.rpc_client.install_snapshot(req, peer.server_addr.clone())) {
+                Ok(resp) => {
+                    // peer任期比自己大，回调为folloer
+                    if resp.term > self.metadata.current_term {
+                        self.step_down(resp.term);
+                        break;
+                    }
+                },
+                Err(e) => {
+                    error!("install snapshot to {:?} failed to send rpc, e: {}", &peer.server_addr, e);
+                    break;
+                },
+            }
+
+            if is_done {
+                // 更新peer next_index
+                peer.next_index = self.snapshot.last_included_index + 1;
+                break;
+            }
+
+            // 更新offset
+            offset += data_cap as u64;
+        }
     }
 
     // 回退状态

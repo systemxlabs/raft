@@ -22,6 +22,11 @@ pub const NONE_SERVER_ID: u64 = 0;
 // 空data
 pub const NONE_DATA: &'static str = "None";
 
+// 发送snapshot时分块大小
+pub const SNAPSHOT_TRUNK_SIZE: usize = 30;
+
+
+
 #[derive(Debug, PartialEq)]
 pub struct ConfigurationState {
     pub in_new: bool,  // 在Cnew配置中，正常情况都处于Cnew
