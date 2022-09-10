@@ -14,7 +14,11 @@ Raft 协议
 - https://raft.github.io/
 
 ## 开始
-
+examples 体验
+1. 运行 app_server1、app_server2 和 app_server3 查看领导人选举和日志复制过程
+2. 基于1，运行 app_server4 和 app_admin_add_server 查看成员变更（增加/替换）过程
+3. 基于1，运行 app_admin_remove_server 查看成员变更（减少）过程
+4. 基于1，等到snapshot创建后，运行 app_server4 和 app_admin_add_server 查看安装快照过程
 
 ## 参考
 - [logcabin/logcabin](https://github.com/logcabin/logcabin)
