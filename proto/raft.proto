@@ -39,14 +39,20 @@ message RequestVoteResp {
   bool voteGranted = 2;           // 候选人赢得了此张选票时为真
 }
 
+enum SnapshotDataType {
+  METADATA = 0;                   // 快照元数据
+  SNAPSHOT = 1;                   // 快照数据
+}
+
 message InstallSnapshotReq {
   uint64 term = 1;                // 当前任期
   uint64 leaderId = 2;            // 领导人的 ID
   uint64 lastIncludedIndex = 3;   // 快照中最后包含的日志条目的索引值
   uint64 lastIncludedTerm = 4;    // 快照中最后包含的日志条目的任期号
-  uint64 offset = 5;              // 分块在快照中的字节偏移量
+  uint64 offset = 5;              // 分块在快照（元数据+快照）中的字节偏移量
   bytes data = 6;                 // 分块的数据
-  bool done = 7;                  // 如果这是最后一个分块，则为 true
+  SnapshotDataType type  = 7;     // 数据类型
+  bool done = 8;                  // 如果这是最后一个分块，则为 true
 }
 message InstallSnapshotResp {
   uint64 term = 1;                // 当前任期，便于领导人更新自己

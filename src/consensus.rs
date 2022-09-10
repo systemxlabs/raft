@@ -252,32 +252,96 @@ impl Consensus {
         // TODO 加锁
         let peer = self.peer_manager.peer(peer_id).unwrap();
 
+        let metadata_filepath = match self.snapshot.latest_metadata_filepath() {
+            Some(filepath) => { filepath },
+            None => { return; }
+        };
         let snapshot_filepath = match self.snapshot.latest_snapshot_filepath() {
             Some(filepath) => { filepath },
             None => { return; }
         };
+
+        let mut metadata_file = std::fs::File::open(metadata_filepath.clone()).unwrap();
         let mut snapshot_file = std::fs::File::open(snapshot_filepath.clone()).unwrap();
+        let metadata_size = metadata_file.metadata().unwrap().len();
         let snapshot_size = snapshot_file.metadata().unwrap().len();
-        info!("install snapshot to peer {}, snapshot_filepath: {}, snapshot_size: {}", peer_id, &snapshot_filepath, snapshot_size);
+        info!("install snapshot to peer {}, metadata_filepath: {}, metadata_size: {}, snapshot_filepath: {}, snapshot_size: {}",
+                peer_id, &metadata_filepath, metadata_size, &snapshot_filepath, snapshot_size);
 
         let mut is_done = false;
+        let mut is_metadata_done = false;
         let mut offset = 0;
+
+        // 循环发送快照元数据
+        loop {
+            // 读取文件chunk
+            let mut data: Vec<u8> = {
+                if offset + (config::SNAPSHOT_TRUNK_SIZE as u64) < metadata_size {
+                    vec![0u8; config::SNAPSHOT_TRUNK_SIZE]
+                } else {
+                    is_metadata_done = true;
+                    vec![0u8; (metadata_size - offset) as usize]
+                }
+            };
+            let data_cap = data.capacity();
+
+            if let Err(e) = metadata_file.seek(std::io::SeekFrom::Start(offset)) {
+                error!("install snapshot to {:?} failed to seek metadata_file, e: {}", &peer.server_addr, e);
+                break;
+            }
+            if let Err(e) = metadata_file.read_exact(&mut data) {
+                error!("install snapshot to {:?} failed to read_exact metadata_file, e: {}", &peer.server_addr, e);
+                break;
+            }
+
+            let req = proto::InstallSnapshotReq {
+                term: self.metadata.current_term,
+                leader_id: self.server_id,
+                last_included_index: self.snapshot.last_included_index,
+                last_included_term: self.snapshot.last_included_term,
+                offset,
+                data,
+                r#type: proto::SnapshotDataType::Metadata.into(),
+                done: is_done
+            };
+
+            // 发送rpc请求
+            match self.tokio_runtime.block_on(self.rpc_client.install_snapshot(req, peer.server_addr.clone())) {
+                Ok(resp) => {
+                    // peer任期比自己大，回调为folloer
+                    if resp.term > self.metadata.current_term {
+                        self.step_down(resp.term);
+                        return;
+                    }
+                },
+                Err(e) => {
+                    error!("install snapshot to {:?} failed to send rpc, e: {}", &peer.server_addr, e);
+                    return;
+                },
+            }
+
+            // 更新offset
+            offset += data_cap as u64;
+
+            if is_metadata_done {
+                break;
+            }
+        }
 
         // 循环发送快照数据
         loop {
-
             // 读取文件chunk
             let mut data: Vec<u8> = {
                 if offset + (config::SNAPSHOT_TRUNK_SIZE as u64) < snapshot_size {
                     vec![0u8; config::SNAPSHOT_TRUNK_SIZE]
                 } else {
                     is_done = true;
-                    vec![0u8; (snapshot_size - offset) as usize]
+                    vec![0u8; (snapshot_size - (offset - metadata_size)) as usize]
                 }
             };
             let data_cap = data.capacity();
 
-            if let Err(e) = snapshot_file.seek(std::io::SeekFrom::Start(offset)) {
+            if let Err(e) = snapshot_file.seek(std::io::SeekFrom::Start(offset - metadata_size)) {
                 error!("install snapshot to {:?} failed to seek, e: {}", &peer.server_addr, e);
                 break;
             }
@@ -293,6 +357,7 @@ impl Consensus {
                 last_included_term: self.snapshot.last_included_term,
                 offset,
                 data,
+                r#type: proto::SnapshotDataType::Snapshot.into(),
                 done: is_done
             };
 
@@ -706,6 +771,7 @@ impl Consensus {
     }
 
     pub fn handle_request_vote(&mut self, request: &proto::RequestVoteReq) -> proto::RequestVoteResp {
+        // TODO step down 后 任期有变化
         let refuse_reply = proto::RequestVoteResp {
             term: self.metadata.current_term,
             vote_granted: false,
@@ -777,11 +843,73 @@ impl Consensus {
 
 
     pub fn handle_install_snapshot(&mut self, request: &proto::InstallSnapshotReq) -> proto::InstallSnapshotResp {
-        info!("handle_install_snapshot");
-        let reply = proto::InstallSnapshotResp {
-            term: 1,
-        };
-        reply
+        // 比较任期
+        if request.term < self.metadata.current_term {
+            info!("refuse snapshot from {} due to leader's term is smaller", request.leader_id);
+            return proto::InstallSnapshotResp { term: self.metadata.current_term };
+        }
+
+        self.step_down(request.term);
+
+        // 更新leaderid
+        if self.leader_id == config::NONE_SERVER_ID {
+            info!("update leader id to {}", request.leader_id);
+            self.leader_id = request.leader_id;
+        }
+        if self.leader_id != request.leader_id {
+            error!("there are more than one leader id, current: {}, new: {}", self.leader_id, request.leader_id);
+            // TODO
+        }
+
+        // 写入到临时文件
+        let tmp_metadata_filepath = self.snapshot.gen_snapshot_metadata_filepath(request.last_included_index, request.last_included_term);
+        let tmp_snapshot_filepath = self.snapshot.gen_tmp_snapshot_filepath(request.last_included_index, request.last_included_term);
+        let mut tmp_metadata_file;
+        let mut tmp_snapshot_file;
+        if request.offset == 0 {
+            // 创建文件
+            tmp_metadata_file = std::fs::File::create(&tmp_metadata_filepath).unwrap();
+            tmp_snapshot_file = std::fs::File::create(&tmp_snapshot_filepath).unwrap();
+        } else {
+            // 打开文件
+            tmp_metadata_file = std::fs::OpenOptions::new().append(true).open(&tmp_metadata_filepath).unwrap();
+            tmp_snapshot_file = std::fs::OpenOptions::new().append(true).open(&tmp_snapshot_filepath).unwrap();
+        }
+
+        // 先传输快照元数据，后传输快照数据
+        match request.r#type() {
+            proto::SnapshotDataType::Metadata => {
+                tmp_metadata_file.write(&request.data);
+            },
+            proto::SnapshotDataType::Snapshot => {
+                tmp_snapshot_file.write(&request.data);
+            },
+        }
+
+        if request.done {
+            // 将临时文件变更为正式文件
+            let metadata_filepath = self.snapshot.gen_snapshot_metadata_filepath(request.last_included_index, request.last_included_term);
+            let snapshot_filepath = self.snapshot.gen_snapshot_filepath(request.last_included_index, request.last_included_term);
+            if let Err(e) = std::fs::rename(tmp_metadata_filepath, metadata_filepath) {
+                error!("failed to rename snapshot metadata file, e: {}", e);
+                return proto::InstallSnapshotResp { term: self.metadata.current_term };
+            }
+            if let Err(e) = std::fs::rename(tmp_snapshot_filepath, snapshot_filepath) {
+                error!("failed to rename snapshot file, e: {}", e);
+                return proto::InstallSnapshotResp { term: self.metadata.current_term };
+            }
+
+            // 重新加载最新snapshot元数据
+            self.snapshot.reload_metadata();
+
+            // TODO 异步应用快照到状态机
+            self.state_machine.restore_snapshot(self.snapshot.latest_snapshot_filepath().unwrap());
+
+            // 截断前面日志
+            self.log.truncate_prefix(self.snapshot.last_included_index);
+        }
+
+        return proto::InstallSnapshotResp { term: self.metadata.current_term };
     }
 
     pub fn handle_get_leader(&mut self, request: &proto::GetLeaderReq) -> proto::GetLeaderResp {

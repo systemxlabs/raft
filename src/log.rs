@@ -132,7 +132,15 @@ impl Log {
         if last_included_index < self.start_index {
             return;
         }
-        self.entries.drain(0..(last_included_index - self.start_index + 1) as usize);
+
+        // 日志条目最新index
+        let last_index = self.last_index(0);
+
+        if last_index < last_included_index {
+            self.entries.clear();
+        } else {
+            self.entries.drain(0..(last_included_index - self.start_index + 1) as usize);
+        }
         self.start_index = last_included_index + 1;
         self.dump();
     }
