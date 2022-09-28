@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
 use logging::*;
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 pub extern crate log as logging;
 pub extern crate rand;
 pub extern crate lazy_static;
@@ -23,7 +24,11 @@ pub fn start(server_id: u64, port: u32, peers: Vec<peer::Peer>, state_machine: B
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");
     }
-    env_logger::init();
+    let file_appender = tracing_appender::rolling::hourly("./logs", "application.log");
+    let all_appenders = file_appender.and(std::io::stdout);
+    tracing_subscriber::fmt()
+        .with_writer(all_appenders)
+        .init();
 
     // metadata_dir 不存在进行创建
     if !std::path::Path::new(&metadata_dir).exists() {
