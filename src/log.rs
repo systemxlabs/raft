@@ -1,8 +1,8 @@
-use std::sync::Mutex;
-use serde::{Deserialize, Serialize};
-use std::io::{Write, Read};
-use crate::{peer, proto, config};
 use crate::logging::*;
+use crate::{config, peer, proto};
+use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
+use std::sync::Mutex;
 
 lazy_static::lazy_static! {
     static ref VIRTUAL_LOG_ENTRY: proto::LogEntry = proto::LogEntry {
@@ -15,7 +15,6 @@ lazy_static::lazy_static! {
 
 pub type LogEntryData = (proto::EntryType, Vec<u8>);
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Log {
     entries: Vec<proto::LogEntry>,
@@ -26,7 +25,6 @@ pub struct Log {
 }
 
 impl Log {
-
     pub fn new(start_index: u64, metadata_dir: String) -> Self {
         Log {
             entries: Vec::new(),
@@ -88,7 +86,11 @@ impl Log {
         if next_index < self.start_index {
             return res;
         }
-        for entry in self.entries.iter().skip((next_index - self.start_index) as usize) {
+        for entry in self
+            .entries
+            .iter()
+            .skip((next_index - self.start_index) as usize)
+        {
             res.push(entry.clone());
         }
         res
@@ -99,7 +101,10 @@ impl Log {
         if self.entries.is_empty() && last_included_index > 0 {
             return last_included_index;
         }
-        self.entries.last().map(|entry| entry.index).unwrap_or(self.start_index - 1)
+        self.entries
+            .last()
+            .map(|entry| entry.index)
+            .unwrap_or(self.start_index - 1)
     }
 
     pub fn last_term(&self, last_included_term: u64) -> u64 {
@@ -110,7 +115,12 @@ impl Log {
         self.entries.last().map(|entry| entry.term).unwrap_or(0)
     }
 
-    pub fn prev_log_term(&self, prev_log_index: u64, last_included_index: u64, last_included_term: u64) -> u64 {
+    pub fn prev_log_term(
+        &self,
+        prev_log_index: u64,
+        last_included_index: u64,
+        last_included_term: u64,
+    ) -> u64 {
         // prev_log 因snapshot被清理
         if prev_log_index == last_included_index {
             return last_included_term;
@@ -123,7 +133,8 @@ impl Log {
         if last_index_kept < self.start_index {
             return;
         }
-        self.entries.truncate((last_index_kept - self.start_index + 1) as usize);
+        self.entries
+            .truncate((last_index_kept - self.start_index + 1) as usize);
         self.dump();
     }
 
@@ -139,7 +150,8 @@ impl Log {
         if last_index < last_included_index {
             self.entries.clear();
         } else {
-            self.entries.drain(0..(last_included_index - self.start_index + 1) as usize);
+            self.entries
+                .drain(0..(last_included_index - self.start_index + 1) as usize);
         }
         self.start_index = last_included_index + 1;
         self.dump();
@@ -170,7 +182,9 @@ impl Log {
         if std::path::Path::new(&filepath).exists() {
             let mut log_file = std::fs::File::open(filepath).unwrap();
             let mut log_json = String::new();
-            log_file.read_to_string(&mut log_json).expect("failed to read raft log");
+            log_file
+                .read_to_string(&mut log_json)
+                .expect("failed to read raft log");
             let log: Log = serde_json::from_str(log_json.as_str()).unwrap();
             self.entries = log.entries;
             self.start_index = log.start_index;
@@ -188,17 +202,21 @@ impl Log {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     #[test]
     fn test_log() {
         let mut log = super::Log::new(1, "./test".to_string());
 
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())]);
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())],
+        );
 
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())]);
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())],
+        );
 
         println!("{:?}", log);
         assert_eq!(log.entries().len(), 2);
@@ -214,9 +232,18 @@ mod tests {
     #[test]
     fn test_truncate_suffix() {
         let mut log = super::Log::new(2, "./test".to_string());
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test3".as_bytes().to_vec())]);
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test3".as_bytes().to_vec())],
+        );
 
         log.truncate_suffix(3);
         assert_eq!(log.entries().len(), 2);
@@ -225,19 +252,43 @@ mod tests {
     #[test]
     fn test_truncate_prefix() {
         let mut log = super::Log::new(1, "./test".to_string());
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test3".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test4".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test5".as_bytes().to_vec())]);
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test1".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test2".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test3".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test4".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test5".as_bytes().to_vec())],
+        );
 
         log.truncate_prefix(3);
         assert_eq!(log.entries().len(), 2);
         assert_eq!(log.start_index(), 4);
 
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test6".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test7".as_bytes().to_vec())]);
-        log.append_data(1, vec![(super::proto::EntryType::Data, "test8".as_bytes().to_vec())]);
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test6".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test7".as_bytes().to_vec())],
+        );
+        log.append_data(
+            1,
+            vec![(super::proto::EntryType::Data, "test8".as_bytes().to_vec())],
+        );
 
         log.truncate_prefix(5);
         assert_eq!(log.entries().len(), 3);

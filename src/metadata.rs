@@ -1,7 +1,7 @@
-use std::io::{Write, Read};
+use crate::config;
 use logging::info;
 use serde::{Deserialize, Serialize};
-use crate::config;
+use std::io::{Read, Write};
 
 // 持久性状态
 #[derive(Debug, Deserialize, Serialize)]
@@ -13,7 +13,11 @@ pub struct Metadata {
 
 impl Metadata {
     pub fn new(metadata_dir: String) -> Metadata {
-        Metadata { current_term: 0, voted_for: config::NONE_SERVER_ID, metadata_dir }
+        Metadata {
+            current_term: 0,
+            voted_for: config::NONE_SERVER_ID,
+            metadata_dir,
+        }
     }
     // 从硬盘中加载或新建
     pub fn reload(&mut self) {
@@ -22,7 +26,9 @@ impl Metadata {
         if std::path::Path::new(&filepath).exists() {
             let mut metadata_file = std::fs::File::open(filepath).unwrap();
             let mut metadata_json = String::new();
-            metadata_file.read_to_string(&mut metadata_json).expect("failed to read raft metadata");
+            metadata_file
+                .read_to_string(&mut metadata_json)
+                .expect("failed to read raft metadata");
             let metadata: Metadata = serde_json::from_str(metadata_json.as_str()).unwrap();
             self.current_term = metadata.current_term;
             self.voted_for = metadata.voted_for;

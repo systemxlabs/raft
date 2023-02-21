@@ -1,5 +1,5 @@
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-use std::io::{Write, Read};
 
 #[derive(Debug)]
 struct MyStateMachine {
@@ -20,14 +20,16 @@ impl raft::state_machine::StateMachine for MyStateMachine {
         if std::path::Path::new(&snapshot_filepath).exists() {
             let mut snapshot_file = std::fs::File::open(snapshot_filepath).unwrap();
             let mut snapshot_json = String::new();
-            snapshot_file.read_to_string(&mut snapshot_json).expect("failed to read snapshot");
+            snapshot_file
+                .read_to_string(&mut snapshot_json)
+                .expect("failed to read snapshot");
             let datas: Vec<Vec<u8>> = serde_json::from_str(snapshot_json.as_str()).unwrap();
             self.datas = datas;
         }
     }
 }
 
-fn main () {
+fn main() {
     println!("Hello, world!");
 
     // 启动实例2
@@ -36,9 +38,18 @@ fn main () {
         raft::peer::Peer::new(3, "http://[::1]:9003".to_string()),
     ];
     let state_machine = Box::new(MyStateMachine { datas: Vec::new() });
-    let snapshot_dir = format!("{}/{}", std::env::current_dir().unwrap().to_str().unwrap(), ".snapshot/app_server2");
-    let metadata_dir = format!("{}/{}", std::env::current_dir().unwrap().to_str().unwrap(), ".metadata/app_server2");
-    let consensus: Arc<Mutex<raft::consensus::Consensus>> = raft::start(2, 9002, peers, state_machine, snapshot_dir, metadata_dir);
+    let snapshot_dir = format!(
+        "{}/{}",
+        std::env::current_dir().unwrap().to_str().unwrap(),
+        ".snapshot/app_server2"
+    );
+    let metadata_dir = format!(
+        "{}/{}",
+        std::env::current_dir().unwrap().to_str().unwrap(),
+        ".metadata/app_server2"
+    );
+    let consensus: Arc<Mutex<raft::consensus::Consensus>> =
+        raft::start(2, 9002, peers, state_machine, snapshot_dir, metadata_dir);
 
     let mut count = 0;
     loop {
@@ -47,7 +58,10 @@ fn main () {
 
         let mut consensus = consensus.lock().unwrap();
         if consensus.state == raft::consensus::State::Leader {
-            consensus.replicate(raft::proto::EntryType::Data, format!("{}", count).as_bytes().to_vec());
+            consensus.replicate(
+                raft::proto::EntryType::Data,
+                format!("{}", count).as_bytes().to_vec(),
+            );
         }
         println!("consensus details: {:#?}", consensus);
     }

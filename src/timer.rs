@@ -1,7 +1,7 @@
+use logging::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, Duration};
-use logging::*;
+use std::time::{Duration, Instant};
 
 // 计时器内部线程检查间隔
 const THREAD_CHECK_INTERVAL: Duration = Duration::from_millis(10);
@@ -28,8 +28,14 @@ impl Timer {
         }
     }
 
-    pub fn schedule<F>(&mut self, interval: Duration, callback: F) where F: 'static + Send + FnMut() -> () {
-        info!("{} execute schedule with interval: {:?}", self.name, &interval);
+    pub fn schedule<F>(&mut self, interval: Duration, callback: F)
+    where
+        F: 'static + Send + FnMut() -> (),
+    {
+        info!(
+            "{} execute schedule with interval: {:?}",
+            self.name, &interval
+        );
 
         (*self.interval.lock().unwrap()) = interval;
         (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
@@ -40,10 +46,8 @@ impl Timer {
         let alive = self.alive.clone();
 
         self.handle = Some(std::thread::spawn(move || {
-
             let callback = Arc::new(Mutex::new(callback));
             loop {
-
                 std::thread::sleep(THREAD_CHECK_INTERVAL);
 
                 if !alive.load(Ordering::SeqCst) {
@@ -51,7 +55,6 @@ impl Timer {
                 }
 
                 if (*next_tick.lock().unwrap()) <= Instant::now() {
-
                     // 异步执行回调函数，不阻塞计时器线程
                     let callback = callback.clone();
                     std::thread::spawn(move || {
@@ -80,7 +83,6 @@ impl Timer {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

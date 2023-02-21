@@ -1,12 +1,12 @@
-use log::info;
 use crate::config;
+use log::info;
 
 #[derive(Debug)]
 pub struct Peer {
     pub server_id: u64,
     pub server_addr: String,
     pub next_index: u64,  // 初始值为领导人最后的日志条目的索引+1
-    pub match_index: u64,  // 初始值为0，单调递增
+    pub match_index: u64, // 初始值为0，单调递增
     pub vote_granted: bool,
     pub configuration_state: config::ConfigurationState,
 }
@@ -26,14 +26,12 @@ impl Peer {
 
 #[derive(Debug)]
 pub struct PeerManager {
-    peers: Vec<Peer>
+    peers: Vec<Peer>,
 }
 
 impl PeerManager {
     pub fn new() -> Self {
-        PeerManager {
-            peers: Vec::new()
-        }
+        PeerManager { peers: Vec::new() }
     }
 
     pub fn add_peers(&mut self, mut peers: Vec<Peer>, last_log_index: u64) {
@@ -45,12 +43,16 @@ impl PeerManager {
 
     pub fn remove_peers(&mut self, server_ids: Vec<u64>) {
         for server_id in server_ids.iter() {
-            if let Some(pos) = self.peers.iter().position(|peer| peer.server_id == server_id.clone()) {
+            if let Some(pos) = self
+                .peers
+                .iter()
+                .position(|peer| peer.server_id == server_id.clone())
+            {
                 self.peers.remove(pos);
             }
         }
     }
-        
+
     pub fn peers_mut(&mut self) -> &mut Vec<Peer> {
         &mut self.peers
     }
@@ -68,19 +70,30 @@ impl PeerManager {
     }
 
     pub fn peer(&mut self, server_id: u64) -> Option<&mut Peer> {
-        self.peers.iter_mut().find(|peer| peer.server_id == server_id)
+        self.peers
+            .iter_mut()
+            .find(|peer| peer.server_id == server_id)
     }
 
     pub fn contains(&self, server_id: u64) -> bool {
-        self.peers.iter().find(|peer| peer.server_id == server_id).is_some()
+        self.peers
+            .iter()
+            .find(|peer| peer.server_id == server_id)
+            .is_some()
     }
 
     pub fn reset_vote(&mut self) {
-        self.peers_mut().iter_mut().for_each(|peer| peer.vote_granted = false);
+        self.peers_mut()
+            .iter_mut()
+            .for_each(|peer| peer.vote_granted = false);
     }
 
     // 从match_index中找到多数的match_index
-    pub fn quorum_match_index(&self, leader_configuration_state: &config::ConfigurationState, leader_last_index: u64) -> u64 {
+    pub fn quorum_match_index(
+        &self,
+        leader_configuration_state: &config::ConfigurationState,
+        leader_last_index: u64,
+    ) -> u64 {
         let mut new_match_indexes: Vec<u64> = Vec::new();
         if leader_configuration_state.in_new {
             new_match_indexes.push(leader_last_index);
@@ -96,7 +109,10 @@ impl PeerManager {
             if new_match_indexes.len() == 0 {
                 std::u64::MAX
             } else {
-                new_match_indexes.get((new_match_indexes.len() - 1) / 2).unwrap().clone()
+                new_match_indexes
+                    .get((new_match_indexes.len() - 1) / 2)
+                    .unwrap()
+                    .clone()
             }
         };
 
@@ -115,7 +131,10 @@ impl PeerManager {
             if old_match_indexes.len() == 0 {
                 std::u64::MAX
             } else {
-                old_match_indexes.get((old_match_indexes.len() - 1) / 2).unwrap().clone()
+                old_match_indexes
+                    .get((old_match_indexes.len() - 1) / 2)
+                    .unwrap()
+                    .clone()
             }
         };
 
@@ -123,7 +142,10 @@ impl PeerManager {
         return std::cmp::min(new_quorum_match_index, old_quorum_match_index);
     }
 
-    pub fn quorum_vote_granted(&self, leader_configuration_state: &config::ConfigurationState) -> bool {
+    pub fn quorum_vote_granted(
+        &self,
+        leader_configuration_state: &config::ConfigurationState,
+    ) -> bool {
         let mut total_new_servers = 0;
         let mut granted_new_servers = 0;
 
@@ -155,16 +177,13 @@ impl PeerManager {
         }
 
         // 满足联合共识
-        let new_servers_quorum = {
-            total_new_servers == 0 || granted_new_servers > (total_new_servers / 2)
-        };
-        let old_servers_quorum = {
-            total_old_servers == 0 || granted_old_servers > (total_old_servers / 2)
-        };
+        let new_servers_quorum =
+            { total_new_servers == 0 || granted_new_servers > (total_new_servers / 2) };
+        let old_servers_quorum =
+            { total_old_servers == 0 || granted_old_servers > (total_old_servers / 2) };
         return new_servers_quorum && old_servers_quorum;
     }
 }
-
 
 #[cfg(test)]
 mod tests {
