@@ -41,7 +41,7 @@ impl Consensus {
         state_machine: Box<dyn state_machine::StateMachine>,
         snapshot_dir: String,
         metadata_dir: String,
-    ) -> Arc<Mutex<Consensus>> {
+    ) -> Consensus {
         let tokio_runtime = tokio::runtime::Runtime::new().unwrap();
         let mut consensus = Consensus {
             server_id,
@@ -85,7 +85,7 @@ impl Consensus {
                 .last_index(consensus.snapshot.last_included_index),
         );
 
-        Arc::new(Mutex::new(consensus))
+        consensus
     }
 
     // 上层应用请求复制数据

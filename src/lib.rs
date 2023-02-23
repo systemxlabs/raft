@@ -50,14 +50,14 @@ pub fn start(
     }
 
     // 创建共识模块
-    let consensus = consensus::Consensus::new(
+    let consensus = Arc::new(Mutex::new(consensus::Consensus::new(
         server_id,
         port,
         peers,
         state_machine,
         snapshot_dir,
         metadata_dir,
-    );
+    )));
 
     // 启动 rpc server
     let consensus_clone = consensus.clone();

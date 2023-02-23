@@ -8,11 +8,17 @@ const THREAD_CHECK_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug)]
 pub struct Timer {
+    // 计时器名称
     name: String,
+    // 控制计时器是否执行
     alive: Arc<AtomicBool>,
-    interval: Arc<Mutex<Duration>>,
+    // 计时器触发间隔
+    trigger_interval: Arc<Mutex<Duration>>,
+    // 计时器下一次触发时间
+    next_trigger: Arc<Mutex<Instant>>,
+    // 上一次重置计时器时间
     pub last_reset_at: Option<Instant>,
-    next_tick: Arc<Mutex<Instant>>,
+    // 计时器线程
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -21,28 +27,29 @@ impl Timer {
         Timer {
             name: name.to_string(),
             alive: Arc::new(AtomicBool::new(false)),
-            interval: Arc::new(Mutex::new(Duration::from_secs(std::u64::MAX))),
+            trigger_interval: Arc::new(Mutex::new(Duration::from_secs(std::u64::MAX))),
+            next_trigger: Arc::new(Mutex::new(Instant::now())),
             last_reset_at: None,
-            next_tick: Arc::new(Mutex::new(Instant::now())),
             handle: None,
         }
     }
 
-    pub fn schedule<F>(&mut self, interval: Duration, callback: F)
+    // 启动计时器
+    pub fn schedule<F>(&mut self, trigger_interval: Duration, callback: F)
     where
         F: 'static + Send + FnMut() -> (),
     {
         info!(
-            "{} execute schedule with interval: {:?}",
-            self.name, &interval
+            "{} start schedule with trigger interval: {}ms",
+            self.name, trigger_interval.as_millis()
         );
 
-        (*self.interval.lock().unwrap()) = interval;
-        (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
+        (*self.trigger_interval.lock().unwrap()) = trigger_interval;
+        (*self.next_trigger.lock().unwrap()) = Instant::now() + trigger_interval;
         self.alive.store(true, Ordering::SeqCst);
 
-        let interval = self.interval.clone();
-        let next_tick = self.next_tick.clone();
+        let trigger_interval = self.trigger_interval.clone();
+        let next_trigger = self.next_trigger.clone();
         let alive = self.alive.clone();
 
         self.handle = Some(std::thread::spawn(move || {
@@ -54,7 +61,7 @@ impl Timer {
                     break;
                 }
 
-                if (*next_tick.lock().unwrap()) <= Instant::now() {
+                if (*next_trigger.lock().unwrap()) <= Instant::now() {
                     // 异步执行回调函数，不阻塞计时器线程
                     let callback = callback.clone();
                     std::thread::spawn(move || {
@@ -62,21 +69,23 @@ impl Timer {
                     });
 
                     // 重新计算下一次触发时间
-                    (*next_tick.lock().unwrap()) = Instant::now() + (*interval.lock().unwrap());
+                    (*next_trigger.lock().unwrap()) = Instant::now() + (*trigger_interval.lock().unwrap());
                 }
             }
         }));
     }
 
-    pub fn reset(&mut self, interval: Duration) {
-        info!("{} execute reset with interval: {:?}", self.name, &interval);
+    // 重置计时器触发间隔
+    pub fn reset(&mut self, trigger_interval: Duration) {
+        info!("{} reset with trigger interval: {}ms", self.name, trigger_interval.as_millis());
         self.last_reset_at = Some(Instant::now());
-        (*self.interval.lock().unwrap()) = interval;
-        (*self.next_tick.lock().unwrap()) = Instant::now() + interval;
+        (*self.trigger_interval.lock().unwrap()) = trigger_interval;
+        (*self.next_trigger.lock().unwrap()) = Instant::now() + trigger_interval;
     }
 
+    // 停止计时器
     pub fn stop(&mut self) {
-        info!("{} execute stop", self.name);
+        info!("{} stopping", self.name);
         self.alive.store(false, Ordering::SeqCst);
         if let Some(handle) = self.handle.take() {
             handle.join().unwrap();
