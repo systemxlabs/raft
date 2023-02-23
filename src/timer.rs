@@ -18,7 +18,7 @@ pub struct Timer {
     next_trigger: Arc<Mutex<Instant>>,
     // 上一次重置计时器时间
     pub last_reset_at: Option<Instant>,
-    // 计时器线程
+    // 计时器内部线程
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -37,11 +37,12 @@ impl Timer {
     // 启动计时器
     pub fn schedule<F>(&mut self, trigger_interval: Duration, callback: F)
     where
-        F: 'static + Send + FnMut() -> (),
+        F: 'static + Send + Clone + FnMut() -> (),
     {
         info!(
             "{} start schedule with trigger interval: {}ms",
-            self.name, trigger_interval.as_millis()
+            self.name,
+            trigger_interval.as_millis()
         );
 
         (*self.trigger_interval.lock().unwrap()) = trigger_interval;
@@ -53,7 +54,6 @@ impl Timer {
         let alive = self.alive.clone();
 
         self.handle = Some(std::thread::spawn(move || {
-            let callback = Arc::new(Mutex::new(callback));
             loop {
                 std::thread::sleep(THREAD_CHECK_INTERVAL);
 
@@ -63,13 +63,14 @@ impl Timer {
 
                 if (*next_trigger.lock().unwrap()) <= Instant::now() {
                     // 异步执行回调函数，不阻塞计时器线程
-                    let callback = callback.clone();
+                    let mut callback = callback.clone();
                     std::thread::spawn(move || {
-                        callback.lock().unwrap()();
+                        callback();
                     });
 
                     // 重新计算下一次触发时间
-                    (*next_trigger.lock().unwrap()) = Instant::now() + (*trigger_interval.lock().unwrap());
+                    (*next_trigger.lock().unwrap()) =
+                        Instant::now() + (*trigger_interval.lock().unwrap());
                 }
             }
         }));
@@ -77,7 +78,11 @@ impl Timer {
 
     // 重置计时器触发间隔
     pub fn reset(&mut self, trigger_interval: Duration) {
-        info!("{} reset with trigger interval: {}ms", self.name, trigger_interval.as_millis());
+        info!(
+            "{} reset with trigger interval: {}ms",
+            self.name,
+            trigger_interval.as_millis()
+        );
         self.last_reset_at = Some(Instant::now());
         (*self.trigger_interval.lock().unwrap()) = trigger_interval;
         (*self.next_trigger.lock().unwrap()) = Instant::now() + trigger_interval;

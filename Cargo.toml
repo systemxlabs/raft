@@ -24,7 +24,42 @@ regex = "1.6.0"
 [build-dependencies]
 tonic-build = "0.7.0"
 
-[workspace]
-members = [
-    "examples"
-]
+[[example]]
+name = "tonic_server"
+path = "examples/hello-tonic/tonic_server.rs"
+
+[[example]]
+name = "tonic_client"
+path = "examples/hello-tonic/tonic_client.rs"
+
+[[example]]
+name = "app_admin"
+path = "examples/raft-app/app_admin.rs"
+
+[[example]]
+name = "app_admin_add_server"
+path = "examples/raft-app/app_admin_add_server.rs"
+
+[[example]]
+name = "app_admin_remove_server"
+path = "examples/raft-app/app_admin_remove_server.rs"
+
+[[example]]
+name = "app_server1"
+path = "examples/raft-app/app_server1.rs"
+
+[[example]]
+name = "app_server2"
+path = "examples/raft-app/app_server2.rs"
+
+[[example]]
+name = "app_server3"
+path = "examples/raft-app/app_server3.rs"
+
+[[example]]
+name = "app_server4"
+path = "examples/raft-app/app_server4.rs"
+
+[[example]]
+name = "rpc_client"
+path = "examples/raft-app/rpc_client.rs"
